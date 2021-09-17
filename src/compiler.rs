@@ -223,7 +223,7 @@ mod test {
         let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
         let expected_output_stream = input_stream.clone();
 
-        test(&instructions, &input_stream, &expected_output_stream);
+        test(&instructions, &[&input_stream], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -244,7 +244,31 @@ mod test {
         let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
 
-        test(&instructions, &input_stream, &expected_output_stream);
+        test(&instructions, &[&input_stream], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn scalar_sums() -> Result<(), CompileError> {
+        let mut p = program::Program::new();
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = p.var("x", Some(&p.load(input_x)));
+        let y = p.var("y", Some(&p.load(input_y)));
+        p.store(output, p.add(&x, &y));
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x = (0..num_elements).into_iter().collect::<Vec<_>>();
+        let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
+        let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 3).collect::<Vec<_>>();
+
+        test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
 
         Ok(())
     }

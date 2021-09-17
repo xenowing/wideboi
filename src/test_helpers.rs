@@ -1,8 +1,7 @@
 use crate::instructions::*;
 
-fn model(instructions: &[Instruction], input_stream: &[i32]) -> (Vec<i32>, u32) {
+fn model(instructions: &[Instruction], input_streams: &[&[i32]], num_threads: u32) -> (Vec<i32>, u32) {
     let num_instructions = instructions.len() as u32;
-    let num_threads = input_stream.len() as u32;
     let mut output_stream = Vec::new();
 
     let num_contexts = 8;
@@ -31,7 +30,7 @@ fn model(instructions: &[Instruction], input_stream: &[i32]) -> (Vec<i32>, u32) 
     let mut next_context = 0;
     let mut next_thread = 0;
 
-    let mut input_stream_offset = 0;
+    let mut input_stream_offsets = vec![0; input_streams.len()];
 
     let mut num_cycles = 0;
 
@@ -44,9 +43,13 @@ fn model(instructions: &[Instruction], input_stream: &[i32]) -> (Vec<i32>, u32) 
                     let rhs = context.registers[rhs as usize];
                     context.registers[dst as usize] = lhs.wrapping_add(rhs);
                 }
-                Instruction::Load(dst, _src) => {
-                    context.registers[dst as usize] = input_stream[input_stream_offset];
-                    input_stream_offset += 1;
+                Instruction::Load(dst, src) => {
+                    let input_stream_index = match src {
+                        InputStream::I0 => 0,
+                        InputStream::I1 => 1,
+                    };
+                    context.registers[dst as usize] = input_streams[input_stream_index][input_stream_offsets[input_stream_index]];
+                    input_stream_offsets[input_stream_index] += 1;
                 }
                 Instruction::Move(dst, src) => {
                     context.registers[dst as usize] = context.registers[src as usize];
@@ -93,18 +96,18 @@ fn model(instructions: &[Instruction], input_stream: &[i32]) -> (Vec<i32>, u32) 
     (output_stream, num_cycles)
 }
 
-pub fn test(instructions: &[Instruction], input_stream: &[i32], expected_output_stream: &[i32]) {
+pub fn test(instructions: &[Instruction], input_streams: &[&[i32]], num_threads: u32, expected_output_stream: &[i32]) {
     println!("instructions:");
     for instruction in instructions {
         println!("  {}", instruction);
     }
 
-    println!("input stream: {:?}", input_stream);
+    println!("input streams: {:?}", input_streams);
     println!("expected output stream: {:?}", expected_output_stream);
 
     println!("testing model");
 
-    let (output_stream, num_cycles) = model(&instructions, &input_stream);
+    let (output_stream, num_cycles) = model(&instructions, input_streams, num_threads);
     println!(" - output stream: {:?}", output_stream);
     println!(" - num cycles: {}", num_cycles);
 

@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InputStream {
     I0,
+    I1,
 }
 
 impl fmt::Display for InputStream {
