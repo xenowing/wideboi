@@ -36,6 +36,13 @@ mod program {
             self.statements.push(Statement::Store(dst, src));
         }
 
+        pub fn temp_var(&mut self, value: &Expr) -> Expr {
+            let name = format!("__temp_{}", self.variables.len());
+            self.variables.push(name.clone());
+            self.statements.push(Statement::DefVar(name.clone(), value.clone()));
+            Expr::VariableRef(name)
+        }
+
         pub fn var(&mut self, name: impl Into<String>, value: &Expr) -> Expr {
             let name = name.into();
             self.variables.push(name.clone());
@@ -203,13 +210,14 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::compiler::program::Program;
     use crate::instructions::InputStream::*;
     use crate::instructions::OutputStream::*;
     use crate::test_helpers::*;
 
     #[test]
     fn id() -> Result<(), CompileError> {
-        let mut p = program::Program::new();
+        let mut p = Program::new();
 
         let input = I0;
         let output = O0;
@@ -229,7 +237,7 @@ mod test {
 
     #[test]
     fn x2() -> Result<(), CompileError> {
-        let mut p = program::Program::new();
+        let mut p = Program::new();
 
         let input = I0;
         let output = O0;
@@ -250,7 +258,7 @@ mod test {
 
     #[test]
     fn scalar_sums() -> Result<(), CompileError> {
-        let mut p = program::Program::new();
+        let mut p = Program::new();
 
         let input_x = I0;
         let input_y = I1;
@@ -266,6 +274,62 @@ mod test {
         let input_stream_x = (0..num_elements).into_iter().collect::<Vec<_>>();
         let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 3).collect::<Vec<_>>();
+
+        test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn vector_sums() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        struct V3 {
+            components: [program::Expr; 3],
+        }
+
+        impl V3 {
+            fn load(src: InputStream, p: &mut Program) -> V3 {
+                V3 {
+                    components: [
+                        p.temp_var(&p.load(src)),
+                        p.temp_var(&p.load(src)),
+                        p.temp_var(&p.load(src)),
+                    ],
+                }
+            }
+
+            fn add(&self, other: &V3, p: &mut Program) -> V3 {
+                V3 {
+                    components: [
+                        p.add(&self.components[0], &other.components[0]),
+                        p.add(&self.components[1], &other.components[1]),
+                        p.add(&self.components[2], &other.components[2]),
+                    ],
+                }
+            }
+
+            fn store(&self, dst: OutputStream, p: &mut Program) {
+                for c in &self.components {
+                    p.store(dst, c.clone());
+                }
+            }
+        }
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = V3::load(input_x, &mut p);
+        let y = V3::load(input_y, &mut p);
+        x.add(&y, &mut p).store(output, &mut p);
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x = (0..num_elements).into_iter().flat_map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
+        let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
+        let expected_output_stream = (0..num_elements).into_iter().flat_map(|x| [x * 3 + 0, x * 3 + 2, x * 3 + 4]).collect::<Vec<_>>();
 
         test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
 

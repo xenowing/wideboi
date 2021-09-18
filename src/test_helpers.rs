@@ -11,7 +11,7 @@ fn model(instructions: &[Instruction], input_streams: &[&[i32]], num_threads: u3
         current_instruction: Option<Instruction>,
 
         pc: u32,
-        registers: [i32; 8],
+        registers: [i32; 16],
     }
 
     impl Context {
@@ -20,7 +20,7 @@ fn model(instructions: &[Instruction], input_streams: &[&[i32]], num_threads: u3
                 current_instruction: None,
 
                 pc: 0,
-                registers: [0; 8],
+                registers: [0; 16],
             }
         }
     }

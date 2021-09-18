@@ -33,6 +33,14 @@ pub enum Register {
     R5,
     R6,
     R7,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
 }
 
 impl Register {
@@ -47,6 +55,14 @@ impl Register {
             5 => Some(Register::R5),
             6 => Some(Register::R6),
             7 => Some(Register::R7),
+            8 => Some(Register::R8),
+            9 => Some(Register::R9),
+            10 => Some(Register::R10),
+            11 => Some(Register::R11),
+            12 => Some(Register::R12),
+            13 => Some(Register::R13),
+            14 => Some(Register::R14),
+            15 => Some(Register::R15),
             _ => None
         }
     }
