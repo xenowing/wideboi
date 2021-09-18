@@ -24,29 +24,27 @@ mod program {
             }
         }
 
-        pub fn add(&self, lhs: &Expr, rhs: &Expr) -> Expr {
-            Expr::Add(Box::new(lhs.clone()), Box::new(rhs.clone()))
+        pub fn add(&self, lhs: Expr, rhs: Expr) -> Expr {
+            Expr::Add(Box::new(lhs), Box::new(rhs))
         }
 
-        pub fn load(&self, src: InputStream) -> Expr {
-            Expr::Load(src)
+        pub fn load(&mut self, src: InputStream) -> Expr {
+            self.temp_var(Expr::Load(src))
         }
 
         pub fn store(&mut self, dst: OutputStream, src: Expr) {
             self.statements.push(Statement::Store(dst, src));
         }
 
-        pub fn temp_var(&mut self, value: &Expr) -> Expr {
+        pub fn temp_var(&mut self, value: Expr) -> Expr {
             let name = format!("__temp_{}", self.variables.len());
-            self.variables.push(name.clone());
-            self.statements.push(Statement::DefVar(name.clone(), value.clone()));
-            Expr::VariableRef(name)
+            self.var(name, value)
         }
 
-        pub fn var(&mut self, name: impl Into<String>, value: &Expr) -> Expr {
+        pub fn var(&mut self, name: impl Into<String>, value: Expr) -> Expr {
             let name = name.into();
             self.variables.push(name.clone());
-            self.statements.push(Statement::DefVar(name.clone(), value.clone()));
+            self.statements.push(Statement::DefVar(name.clone(), value));
             Expr::VariableRef(name)
         }
     }
@@ -221,7 +219,8 @@ mod test {
 
         let input = I0;
         let output = O0;
-        p.store(output, p.load(input));
+        let x = p.load(input);
+        p.store(output, x);
 
         let instructions = compile(&p)?;
 
@@ -241,8 +240,8 @@ mod test {
 
         let input = I0;
         let output = O0;
-        let x = p.var("x", &p.load(input));
-        p.store(output, p.add(&x, &x));
+        let x = p.load(input);
+        p.store(output, p.add(x.clone(), x));
 
         let instructions = compile(&p)?;
 
@@ -265,7 +264,7 @@ mod test {
         let output = O0;
         let x = p.load(input_x);
         let y = p.load(input_y);
-        p.store(output, p.add(&x, &y));
+        p.store(output, p.add(x, y));
 
         let instructions = compile(&p)?;
 
@@ -285,34 +284,32 @@ mod test {
         let mut p = Program::new();
 
         struct V3 {
-            components: [program::Expr; 3],
+            x: program::Expr,
+            y: program::Expr,
+            z: program::Expr,
         }
 
         impl V3 {
             fn load(src: InputStream, p: &mut Program) -> V3 {
                 V3 {
-                    components: [
-                        p.temp_var(&p.load(src)),
-                        p.temp_var(&p.load(src)),
-                        p.temp_var(&p.load(src)),
-                    ],
+                    x: p.load(src),
+                    y: p.load(src),
+                    z: p.load(src),
                 }
             }
 
             fn add(&self, other: &V3, p: &mut Program) -> V3 {
                 V3 {
-                    components: [
-                        p.add(&self.components[0], &other.components[0]),
-                        p.add(&self.components[1], &other.components[1]),
-                        p.add(&self.components[2], &other.components[2]),
-                    ],
+                    x: p.add(self.x.clone(), other.x.clone()),
+                    y: p.add(self.y.clone(), other.y.clone()),
+                    z: p.add(self.z.clone(), other.z.clone()),
                 }
             }
 
             fn store(&self, dst: OutputStream, p: &mut Program) {
-                for c in &self.components {
-                    p.store(dst, c.clone());
-                }
+                p.store(dst, self.x.clone());
+                p.store(dst, self.y.clone());
+                p.store(dst, self.z.clone());
             }
         }
 
