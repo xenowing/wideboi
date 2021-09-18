@@ -36,14 +36,10 @@ mod program {
             self.statements.push(Statement::Store(dst, src));
         }
 
-        pub fn var(&mut self, name: impl Into<String>, initializer: Option<&Expr>) -> Expr {
+        pub fn var(&mut self, name: impl Into<String>, value: &Expr) -> Expr {
             let name = name.into();
             self.variables.push(name.clone());
-
-            if let Some(initializer) = initializer {
-                self.statements.push(Statement::Assign(name.clone(), initializer.clone()));
-            }
-
+            self.statements.push(Statement::DefVar(name.clone(), value.clone()));
             Expr::VariableRef(name)
         }
     }
@@ -57,7 +53,7 @@ mod program {
     }
 
     pub enum Statement {
-        Assign(String, Expr),
+        DefVar(String, Expr),
         Store(OutputStream, Expr),
     }
 }
@@ -85,12 +81,16 @@ mod ir {
             self.variables.push(Variable::new(name.clone()));
             name
         }
+
+        pub fn get_register(&self, variable_name: &str) -> Option<Register> {
+            self.variables.iter().find(|v| v.name == variable_name).unwrap().register
+        }
     }
 
     #[derive(Debug)]
     pub enum Statement {
         Add(String, String, String),
-        Assign(String, String),
+        DefVar(String, String),
         Load(String, InputStream),
         Store(OutputStream, String),
     }
@@ -136,9 +136,9 @@ fn parse(p: &program::Program, program: &mut ir::Program) {
 
 fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     match *s {
-        program::Statement::Assign(ref dst, ref src) => {
+        program::Statement::DefVar(ref dst, ref src) => {
             let src = parse_expr(src, program);
-            program.statements.push(ir::Statement::Assign(dst.clone(), src));
+            program.statements.push(ir::Statement::DefVar(dst.clone(), src));
         }
         program::Statement::Store(dst, ref src) => {
             let src = parse_expr(src, program);
@@ -179,23 +179,22 @@ fn allocate_registers(program: &mut ir::Program) -> Result<(), CompileError> {
 fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
     program.statements.iter().map(|s| match *s {
         ir::Statement::Add(ref dst, ref lhs, ref rhs) => {
-            // TODO: Factor out variable name -> register mapping
-            let dst = program.variables.iter().find(|v| v.name == *dst).unwrap().register.unwrap();
-            let lhs = program.variables.iter().find(|v| v.name == *lhs).unwrap().register.unwrap();
-            let rhs = program.variables.iter().find(|v| v.name == *rhs).unwrap().register.unwrap();
+            let dst = program.get_register(dst).unwrap();
+            let lhs = program.get_register(lhs).unwrap();
+            let rhs = program.get_register(rhs).unwrap();
             add(dst, lhs, rhs)
         }
-        ir::Statement::Assign(ref dst, ref src) => {
-            let dst = program.variables.iter().find(|v| v.name == *dst).unwrap().register.unwrap();
-            let src = program.variables.iter().find(|v| v.name == *src).unwrap().register.unwrap();
+        ir::Statement::DefVar(ref dst, ref src) => {
+            let dst = program.get_register(dst).unwrap();
+            let src = program.get_register(src).unwrap();
             mov(dst, src)
         }
         ir::Statement::Load(ref dst, src) => {
-            let dst = program.variables.iter().find(|v| v.name == *dst).unwrap().register.unwrap();
+            let dst = program.get_register(dst).unwrap();
             lod(dst, src)
         }
         ir::Statement::Store(dst, ref src) => {
-            let src = program.variables.iter().find(|v| v.name == *src).unwrap().register.unwrap();
+            let src = program.get_register(src).unwrap();
             str(dst, src)
         }
     }).collect()
@@ -234,7 +233,7 @@ mod test {
 
         let input = I0;
         let output = O0;
-        let x = p.var("x", Some(&p.load(input)));
+        let x = p.var("x", &p.load(input));
         p.store(output, p.add(&x, &x));
 
         let instructions = compile(&p)?;
@@ -256,8 +255,8 @@ mod test {
         let input_x = I0;
         let input_y = I1;
         let output = O0;
-        let x = p.var("x", Some(&p.load(input_x)));
-        let y = p.var("y", Some(&p.load(input_y)));
+        let x = p.load(input_x);
+        let y = p.load(input_y);
         p.store(output, p.add(&x, &y));
 
         let instructions = compile(&p)?;
