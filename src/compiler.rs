@@ -29,23 +29,19 @@ mod program {
         }
 
         pub fn load(&mut self, src: InputStream) -> Expr {
-            self.temp_var(Expr::Load(src))
+            let name = self.temp_var();
+            self.statements.push(Statement::Load(name.clone(), src));
+            Expr::VariableRef(name)
         }
 
         pub fn store(&mut self, dst: OutputStream, src: Expr) {
             self.statements.push(Statement::Store(dst, src));
         }
 
-        pub fn temp_var(&mut self, value: Expr) -> Expr {
+        pub fn temp_var(&mut self) -> String {
             let name = format!("__temp_{}", self.variables.len());
-            self.var(name, value)
-        }
-
-        pub fn var(&mut self, name: impl Into<String>, value: Expr) -> Expr {
-            let name = name.into();
             self.variables.push(name.clone());
-            self.statements.push(Statement::DefVar(name.clone(), value));
-            Expr::VariableRef(name)
+            name
         }
     }
 
@@ -53,12 +49,11 @@ mod program {
     #[derive(Clone)]
     pub enum Expr {
         Add(Box<Expr>, Box<Expr>),
-        Load(InputStream),
         VariableRef(String),
     }
 
     pub enum Statement {
-        DefVar(String, Expr),
+        Load(String, InputStream),
         Store(OutputStream, Expr),
     }
 }
@@ -95,7 +90,6 @@ mod ir {
     #[derive(Debug)]
     pub enum Statement {
         Add(String, String, String),
-        DefVar(String, String),
         Load(String, InputStream),
         Store(OutputStream, String),
     }
@@ -141,9 +135,8 @@ fn parse(p: &program::Program, program: &mut ir::Program) {
 
 fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     match *s {
-        program::Statement::DefVar(ref dst, ref src) => {
-            let src = parse_expr(src, program);
-            program.statements.push(ir::Statement::DefVar(dst.clone(), src));
+        program::Statement::Load(ref dst, src) => {
+            program.statements.push(ir::Statement::Load(dst.clone(), src))
         }
         program::Statement::Store(dst, ref src) => {
             let src = parse_expr(src, program);
@@ -159,11 +152,6 @@ fn parse_expr(e: &program::Expr, program: &mut ir::Program) -> String {
             let rhs = parse_expr(rhs, program);
             let t = program.alloc_temp();
             program.statements.push(ir::Statement::Add(t.clone(), lhs, rhs));
-            t
-        }
-        program::Expr::Load(src) => {
-            let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Load(t.clone(), src));
             t
         }
         program::Expr::VariableRef(ref src) => {
@@ -188,11 +176,6 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
             let lhs = program.get_register(lhs).unwrap();
             let rhs = program.get_register(rhs).unwrap();
             add(dst, lhs, rhs)
-        }
-        ir::Statement::DefVar(ref dst, ref src) => {
-            let dst = program.get_register(dst).unwrap();
-            let src = program.get_register(src).unwrap();
-            mov(dst, src)
         }
         ir::Statement::Load(ref dst, src) => {
             let dst = program.get_register(dst).unwrap();
