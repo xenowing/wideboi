@@ -78,7 +78,7 @@ impl fmt::Display for Register {
 pub enum Instruction {
     Add(Register, Register, Register),
     Load(Register, InputStream),
-    Move(Register, Register),
+    Mul(Register, Register, Register),
     Store(OutputStream, Register),
 }
 
@@ -88,7 +88,7 @@ impl Instruction {
         match self {
             Instruction::Add(_, _, _) => "add",
             Instruction::Load(_, _) => "lod",
-            Instruction::Move(_, _) => "mov",
+            Instruction::Mul(_, _, _) => "mul",
             Instruction::Store(_, _) => "str",
         }
     }
@@ -100,7 +100,7 @@ impl fmt::Display for Instruction {
         match self {
             Instruction::Add(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
             Instruction::Load(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
-            Instruction::Move(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
+            Instruction::Mul(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
             Instruction::Store(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
         }
     }
@@ -114,8 +114,8 @@ pub fn lod(dst: Register, src: InputStream) -> Instruction {
     Instruction::Load(dst, src)
 }
 
-pub fn mov(dst: Register, src: Register) -> Instruction {
-    Instruction::Move(dst, src)
+pub fn mul(dst: Register, lhs: Register, rhs: Register) -> Instruction {
+    Instruction::Mul(dst, lhs, rhs)
 }
 
 pub fn str(dst: OutputStream, src: Register) -> Instruction {
@@ -141,8 +141,8 @@ mod test {
     }
 
     #[test]
-    fn assemble_mov() {
-        assert_eq!(mov(R3, R4), Move(R3, R4));
+    fn assemble_mul() {
+        assert_eq!(mul(R3, R4, R5), Mul(R3, R4, R5));
     }
 
     #[test]

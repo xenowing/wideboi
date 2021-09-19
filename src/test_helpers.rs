@@ -51,8 +51,10 @@ fn model(instructions: &[Instruction], input_streams: &[&[i32]], num_threads: u3
                     context.registers[dst as usize] = input_streams[input_stream_index][input_stream_offsets[input_stream_index]];
                     input_stream_offsets[input_stream_index] += 1;
                 }
-                Instruction::Move(dst, src) => {
-                    context.registers[dst as usize] = context.registers[src as usize];
+                Instruction::Mul(dst, lhs, rhs) => {
+                    let lhs = context.registers[lhs as usize];
+                    let rhs = context.registers[rhs as usize];
+                    context.registers[dst as usize] = lhs.wrapping_mul(rhs);
                 }
                 Instruction::Store(_dst, src) => {
                     output_stream.push(context.registers[src as usize]);

@@ -11,6 +11,8 @@ pub enum CompileError {
 mod program {
     use crate::instructions::*;
 
+    use std::ops::{Add, Mul};
+
     pub struct Program {
         pub statements: Vec<Statement>,
         pub variables: Vec<String>,
@@ -24,22 +26,10 @@ mod program {
             }
         }
 
-        pub fn add_s(&self, lhs: Expr, rhs: Expr) -> Expr {
-            Expr::Add(Box::new(lhs), Box::new(rhs))
-        }
-
-        pub fn add_v3(&self, lhs: V3, rhs: V3) -> V3 {
-            V3 {
-                x: self.add_s(lhs.x, rhs.x),
-                y: self.add_s(lhs.y, rhs.y),
-                z: self.add_s(lhs.z, rhs.z),
-            }
-        }
-
-        pub fn load_s(&mut self, src: InputStream) -> Expr {
+        pub fn load_s(&mut self, src: InputStream) -> Scalar {
             let name = self.temp_var();
             self.statements.push(Statement::Load(name.clone(), src));
-            Expr::VariableRef(name)
+            Scalar::VariableRef(name)
         }
 
         pub fn load_v3(&mut self, src: InputStream) -> V3 {
@@ -50,7 +40,7 @@ mod program {
             }
         }
 
-        pub fn store_s(&mut self, dst: OutputStream, src: Expr) {
+        pub fn store_s(&mut self, dst: OutputStream, src: Scalar) {
             self.statements.push(Statement::Store(dst, src));
         }
 
@@ -60,30 +50,77 @@ mod program {
             self.store_s(dst, src.z);
         }
 
-        pub fn temp_var(&mut self) -> String {
+        fn temp_var(&mut self) -> String {
             let name = format!("__temp_{}", self.variables.len());
             self.variables.push(name.clone());
             name
         }
     }
 
-    // TODO: Don't derive Clone/Copy for recursive type!
     #[derive(Clone)]
-    pub enum Expr {
-        Add(Box<Expr>, Box<Expr>),
+    pub enum Scalar {
+        Add(Box<Scalar>, Box<Scalar>),
+        Mul(Box<Scalar>, Box<Scalar>),
         VariableRef(String),
+    }
+
+    impl Add for Scalar {
+        type Output = Self;
+
+        fn add(self, other: Self) -> Self {
+            Self::Add(Box::new(self), Box::new(other))
+        }
+    }
+
+    impl Mul for Scalar {
+        type Output = Self;
+
+        fn mul(self, other: Self) -> Self {
+            Self::Mul(Box::new(self), Box::new(other))
+        }
     }
 
     pub enum Statement {
         Load(String, InputStream),
-        Store(OutputStream, Expr),
+        Store(OutputStream, Scalar),
     }
 
     #[derive(Clone)]
     pub struct V3 {
-        pub x: Expr,
-        pub y: Expr,
-        pub z: Expr,
+        pub x: Scalar,
+        pub y: Scalar,
+        pub z: Scalar,
+    }
+
+    impl V3 {
+        pub fn dot(self, other: V3) -> Scalar {
+            let temp = self * other;
+            temp.x + temp.y + temp.z
+        }
+    }
+
+    impl Add for V3 {
+        type Output = Self;
+
+        fn add(self, other: Self) -> Self {
+            Self {
+                x: self.x + other.x,
+                y: self.y + other.y,
+                z: self.z + other.z,
+            }
+        }
+    }
+
+    impl Mul for V3 {
+        type Output = Self;
+
+        fn mul(self, other: Self) -> Self {
+            Self {
+                x: self.x * other.x,
+                y: self.y * other.y,
+                z: self.z * other.z,
+            }
+        }
     }
 }
 
@@ -120,6 +157,7 @@ mod ir {
     pub enum Statement {
         Add(String, String, String),
         Load(String, InputStream),
+        Mul(String, String, String),
         Store(OutputStream, String),
     }
 
@@ -174,16 +212,23 @@ fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     }
 }
 
-fn parse_expr(e: &program::Expr, program: &mut ir::Program) -> String {
+fn parse_expr(e: &program::Scalar, program: &mut ir::Program) -> String {
     match *e {
-        program::Expr::Add(ref lhs, ref rhs) => {
+        program::Scalar::Add(ref lhs, ref rhs) => {
             let lhs = parse_expr(lhs, program);
             let rhs = parse_expr(rhs, program);
             let t = program.alloc_temp();
             program.statements.push(ir::Statement::Add(t.clone(), lhs, rhs));
             t
         }
-        program::Expr::VariableRef(ref src) => {
+        program::Scalar::Mul(ref lhs, ref rhs) => {
+            let lhs = parse_expr(lhs, program);
+            let rhs = parse_expr(rhs, program);
+            let t = program.alloc_temp();
+            program.statements.push(ir::Statement::Mul(t.clone(), lhs, rhs));
+            t
+        }
+        program::Scalar::VariableRef(ref src) => {
             src.clone()
         }
     }
@@ -205,6 +250,12 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
             let lhs = program.get_register(lhs).unwrap();
             let rhs = program.get_register(rhs).unwrap();
             add(dst, lhs, rhs)
+        }
+        ir::Statement::Mul(ref dst, ref lhs, ref rhs) => {
+            let dst = program.get_register(dst).unwrap();
+            let lhs = program.get_register(lhs).unwrap();
+            let rhs = program.get_register(rhs).unwrap();
+            mul(dst, lhs, rhs)
         }
         ir::Statement::Load(ref dst, src) => {
             let dst = program.get_register(dst).unwrap();
@@ -253,7 +304,7 @@ mod test {
         let input = I0;
         let output = O0;
         let x = p.load_s(input);
-        p.store_s(output, p.add_s(x.clone(), x));
+        p.store_s(output, x.clone() + x);
 
         let instructions = compile(&p)?;
 
@@ -276,7 +327,7 @@ mod test {
         let output = O0;
         let x = p.load_s(input_x);
         let y = p.load_s(input_y);
-        p.store_s(output, p.add_s(x, y));
+        p.store_s(output, x + y);
 
         let instructions = compile(&p)?;
 
@@ -292,6 +343,30 @@ mod test {
     }
 
     #[test]
+    fn scalar_muls_integer() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = p.load_s(input_x);
+        let y = p.load_s(input_y);
+        p.store_s(output, x * y);
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x = (0..num_elements).into_iter().collect::<Vec<_>>();
+        let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
+        let expected_output_stream = (0..num_elements).into_iter().map(|x| x * x * 2).collect::<Vec<_>>();
+
+        test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
     fn vector_sums() -> Result<(), CompileError> {
         let mut p = Program::new();
 
@@ -300,7 +375,7 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_v3(output, p.add_v3(x, y));
+        p.store_v3(output, x + y);
 
         let instructions = compile(&p)?;
 
@@ -309,6 +384,64 @@ mod test {
         let input_stream_x = (0..num_elements).into_iter().flat_map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
         let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().flat_map(|x| [x * 3 + 0, x * 3 + 2, x * 3 + 4]).collect::<Vec<_>>();
+
+        test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn vector_muls_integer() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = p.load_v3(input_x);
+        let y = p.load_v3(input_y);
+        p.store_v3(output, x * y);
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x = (0..num_elements).into_iter().flat_map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
+        let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
+        let expected_output_stream =
+            input_stream_x.iter()
+            .zip(input_stream_y.iter())
+            .map(|(&x, &y)| x * y)
+            .collect::<Vec<_>>();
+
+        test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn vector_dots_integer() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = p.load_v3(input_x);
+        let y = p.load_v3(input_y);
+        p.store_s(output, x.dot(y));
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x_v3 = (0..num_elements).into_iter().map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
+        let input_stream_y_v3 = (0..num_elements).into_iter().map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
+        let expected_output_stream =
+            input_stream_x_v3.iter()
+            .zip(input_stream_y_v3.iter())
+            .map(|(x, y)| (x[0] * y[0]) + (x[1] * y[1]) + (x[2] * y[2]))
+            .collect::<Vec<_>>();
+        let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
+        let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
 
         test(&instructions, &[&input_stream_x, &input_stream_y], num_elements as _, &expected_output_stream);
 
