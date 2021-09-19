@@ -24,18 +24,40 @@ mod program {
             }
         }
 
-        pub fn add(&self, lhs: Expr, rhs: Expr) -> Expr {
+        pub fn add_s(&self, lhs: Expr, rhs: Expr) -> Expr {
             Expr::Add(Box::new(lhs), Box::new(rhs))
         }
 
-        pub fn load(&mut self, src: InputStream) -> Expr {
+        pub fn add_v3(&self, lhs: V3, rhs: V3) -> V3 {
+            V3 {
+                x: self.add_s(lhs.x, rhs.x),
+                y: self.add_s(lhs.y, rhs.y),
+                z: self.add_s(lhs.z, rhs.z),
+            }
+        }
+
+        pub fn load_s(&mut self, src: InputStream) -> Expr {
             let name = self.temp_var();
             self.statements.push(Statement::Load(name.clone(), src));
             Expr::VariableRef(name)
         }
 
-        pub fn store(&mut self, dst: OutputStream, src: Expr) {
+        pub fn load_v3(&mut self, src: InputStream) -> V3 {
+            V3 {
+                x: self.load_s(src),
+                y: self.load_s(src),
+                z: self.load_s(src),
+            }
+        }
+
+        pub fn store_s(&mut self, dst: OutputStream, src: Expr) {
             self.statements.push(Statement::Store(dst, src));
+        }
+
+        pub fn store_v3(&mut self, dst: OutputStream, src: V3) {
+            self.store_s(dst, src.x);
+            self.store_s(dst, src.y);
+            self.store_s(dst, src.z);
         }
 
         pub fn temp_var(&mut self) -> String {
@@ -55,6 +77,13 @@ mod program {
     pub enum Statement {
         Load(String, InputStream),
         Store(OutputStream, Expr),
+    }
+
+    #[derive(Clone)]
+    pub struct V3 {
+        pub x: Expr,
+        pub y: Expr,
+        pub z: Expr,
     }
 }
 
@@ -202,8 +231,8 @@ mod test {
 
         let input = I0;
         let output = O0;
-        let x = p.load(input);
-        p.store(output, x);
+        let x = p.load_s(input);
+        p.store_s(output, x);
 
         let instructions = compile(&p)?;
 
@@ -223,8 +252,8 @@ mod test {
 
         let input = I0;
         let output = O0;
-        let x = p.load(input);
-        p.store(output, p.add(x.clone(), x));
+        let x = p.load_s(input);
+        p.store_s(output, p.add_s(x.clone(), x));
 
         let instructions = compile(&p)?;
 
@@ -245,9 +274,9 @@ mod test {
         let input_x = I0;
         let input_y = I1;
         let output = O0;
-        let x = p.load(input_x);
-        let y = p.load(input_y);
-        p.store(output, p.add(x, y));
+        let x = p.load_s(input_x);
+        let y = p.load_s(input_y);
+        p.store_s(output, p.add_s(x, y));
 
         let instructions = compile(&p)?;
 
@@ -266,42 +295,12 @@ mod test {
     fn vector_sums() -> Result<(), CompileError> {
         let mut p = Program::new();
 
-        struct V3 {
-            x: program::Expr,
-            y: program::Expr,
-            z: program::Expr,
-        }
-
-        impl V3 {
-            fn load(src: InputStream, p: &mut Program) -> V3 {
-                V3 {
-                    x: p.load(src),
-                    y: p.load(src),
-                    z: p.load(src),
-                }
-            }
-
-            fn add(&self, other: &V3, p: &mut Program) -> V3 {
-                V3 {
-                    x: p.add(self.x.clone(), other.x.clone()),
-                    y: p.add(self.y.clone(), other.y.clone()),
-                    z: p.add(self.z.clone(), other.z.clone()),
-                }
-            }
-
-            fn store(&self, dst: OutputStream, p: &mut Program) {
-                p.store(dst, self.x.clone());
-                p.store(dst, self.y.clone());
-                p.store(dst, self.z.clone());
-            }
-        }
-
         let input_x = I0;
         let input_y = I1;
         let output = O0;
-        let x = V3::load(input_x, &mut p);
-        let y = V3::load(input_y, &mut p);
-        x.add(&y, &mut p).store(output, &mut p);
+        let x = p.load_v3(input_x);
+        let y = p.load_v3(input_y);
+        p.store_v3(output, p.add_v3(x, y));
 
         let instructions = compile(&p)?;
 
