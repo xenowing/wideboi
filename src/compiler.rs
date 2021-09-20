@@ -1,5 +1,7 @@
 use crate::instructions::*;
 
+use std::collections::{BTreeMap, BTreeSet};
+
 #[derive(Debug)]
 pub enum CompileError {
     // TODO: Proper desc/fields
@@ -183,7 +185,11 @@ pub fn compile(p: &program::Program) -> Result<Vec<Instruction>, CompileError> {
     parse(p, &mut program);
     println!("Parse result: {:#?}", program);
 
-    allocate_registers(&mut program)?;
+    let (interference_edges, variable_degrees) = analyze_liveness(&program);
+    println!("Interference edges: {:#?}", interference_edges);
+    println!("Variable degrees: {:#?}", variable_degrees);
+
+    allocate_registers(&mut program, interference_edges, variable_degrees)?;
     println!("Register allocation result: {:#?}", program.variables);
 
     Ok(generate_instructions(&program))
@@ -206,24 +212,24 @@ fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
             program.statements.push(ir::Statement::Load(dst.clone(), src))
         }
         program::Statement::Store(dst, ref src) => {
-            let src = parse_expr(src, program);
+            let src = parse_scalar(src, program);
             program.statements.push(ir::Statement::Store(dst, src))
         }
     }
 }
 
-fn parse_expr(e: &program::Scalar, program: &mut ir::Program) -> String {
-    match *e {
+fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> String {
+    match *s {
         program::Scalar::Add(ref lhs, ref rhs) => {
-            let lhs = parse_expr(lhs, program);
-            let rhs = parse_expr(rhs, program);
+            let lhs = parse_scalar(lhs, program);
+            let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
             program.statements.push(ir::Statement::Add(t.clone(), lhs, rhs));
             t
         }
         program::Scalar::Mul(ref lhs, ref rhs) => {
-            let lhs = parse_expr(lhs, program);
-            let rhs = parse_expr(rhs, program);
+            let lhs = parse_scalar(lhs, program);
+            let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
             program.statements.push(ir::Statement::Mul(t.clone(), lhs, rhs));
             t
@@ -234,10 +240,76 @@ fn parse_expr(e: &program::Scalar, program: &mut ir::Program) -> String {
     }
 }
 
-fn allocate_registers(program: &mut ir::Program) -> Result<(), CompileError> {
-    // TODO: lol :)
-    for (i, v) in program.variables.iter_mut().enumerate() {
-        v.register = Some(Register::from_u32(i as _).ok_or(CompileError::TooManyRegisters)?);
+fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(String, String)>, BTreeMap<String, u32>) {
+    let mut live_variables = BTreeSet::new();
+    let mut interference_edges = BTreeSet::new();
+    let mut variable_degrees = BTreeMap::new();
+
+    for v in &p.variables {
+        variable_degrees.insert(v.name.clone(), 0);
+    }
+
+    for s in p.statements.iter().rev() {
+        let (uses, defs) = match *s {
+            ir::Statement::Add(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], vec![dst]),
+            ir::Statement::Mul(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], vec![dst]),
+            ir::Statement::Load(ref dst, _) => (Vec::new(), vec![dst]),
+            ir::Statement::Store(_, ref src) => (vec![src.clone()], Vec::new()),
+        };
+        for d in defs {
+            live_variables.remove(d);
+        }
+        for u in uses {
+            live_variables.insert(u);
+        }
+        for x in live_variables.iter() {
+            for y in live_variables.iter() {
+                if x == y {
+                    continue;
+                }
+
+                let edge = if x < y { (x.clone(), y.clone()) } else { (y.clone(), x.clone()) };
+
+                if interference_edges.insert(edge) {
+                    *variable_degrees.get_mut(x).unwrap() += 1;
+                    *variable_degrees.get_mut(y).unwrap() += 1;
+                }
+            }
+        }
+    }
+
+    (interference_edges, variable_degrees)
+}
+
+fn allocate_registers(
+    program: &mut ir::Program,
+    interference_edges: BTreeSet<(String, String)>,
+    variable_degrees: BTreeMap<String, u32>,
+) -> Result<(), CompileError> {
+    let mut remaining_variables = variable_degrees.into_iter().map(|(v, d)| (d, v)).collect::<Vec<_>>();
+    remaining_variables.sort();
+    let remaining_variables = remaining_variables.into_iter().map(|(_, v)| v).rev().collect::<Vec<_>>();
+
+    for v in remaining_variables {
+        let mut register_index = 0;
+        loop {
+            let mut bumped = false;
+            for (x, y) in interference_edges.iter().filter(|(x, y)| *x == v || *y == v) {
+                let other = if *x == v { y } else { x };
+                if let Some(other_register) = program.get_register(other) {
+                    if register_index == other_register as u32 {
+                        register_index += 1;
+                        bumped = true;
+                        break;
+                    }
+                }
+            }
+            if !bumped {
+                break;
+            }
+        }
+        let register = Register::from_u32(register_index).ok_or(CompileError::TooManyRegisters)?;
+        program.variables.iter_mut().find(|x| x.name == v).unwrap().register = Some(register);
     }
 
     Ok(())
