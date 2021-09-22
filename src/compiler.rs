@@ -262,13 +262,9 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(String, String)>, BTreeMap<St
         for u in uses {
             live_variables.insert(u);
         }
-        for x in live_variables.iter() {
-            for y in live_variables.iter() {
-                if x == y {
-                    continue;
-                }
-
-                let edge = if x < y { (x.clone(), y.clone()) } else { (y.clone(), x.clone()) };
+        for (i, x) in live_variables.iter().enumerate() {
+            for y in live_variables.iter().skip(i) {
+                let edge = (x.clone(), y.clone());
 
                 if interference_edges.insert(edge) {
                     *variable_degrees.get_mut(x).unwrap() += 1;
