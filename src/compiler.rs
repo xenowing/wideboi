@@ -250,13 +250,13 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(String, String)>, BTreeMap<St
     }
 
     for s in p.statements.iter().rev() {
-        let (uses, defs) = match *s {
-            ir::Statement::Add(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], vec![dst]),
-            ir::Statement::Mul(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], vec![dst]),
-            ir::Statement::Load(ref dst, _) => (Vec::new(), vec![dst]),
-            ir::Statement::Store(_, ref src) => (vec![src.clone()], Vec::new()),
+        let (uses, def) = match *s {
+            ir::Statement::Add(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], Some(dst)),
+            ir::Statement::Mul(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], Some(dst)),
+            ir::Statement::Load(ref dst, _) => (Vec::new(), Some(dst)),
+            ir::Statement::Store(_, ref src) => (vec![src.clone()], None),
         };
-        for d in defs {
+        if let Some(d) = def {
             live_variables.remove(d);
         }
         for u in uses {
