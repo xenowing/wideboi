@@ -12,7 +12,12 @@ pub struct OutputStreamInfo {
     pub thread_stride: u32,
 }
 
-fn model<'a>(instructions: &[Instruction], input_stream_infos: &[InputStreamInfo<'a>], output_stream_info: OutputStreamInfo, num_threads: u32) -> (Vec<i32>, u32) {
+fn model<'a>(
+    instructions: &[Instruction],
+    input_stream_infos: &[InputStreamInfo<'a>],
+    output_stream_info: OutputStreamInfo,
+    num_threads: u32,
+) -> (Vec<i32>, u32) {
     let num_instructions = instructions.len() as u32;
     let mut output_stream = vec![0; output_stream_info.num_words as usize];
 
@@ -122,7 +127,13 @@ fn model<'a>(instructions: &[Instruction], input_stream_infos: &[InputStreamInfo
     (output_stream, num_cycles)
 }
 
-pub fn test<'a>(instructions: &[Instruction], input_stream_infos: &[InputStreamInfo<'a>], output_stream_info: OutputStreamInfo, num_threads: u32, expected_output_stream: &[i32]) {
+pub fn test<'a>(
+    instructions: &[Instruction],
+    input_stream_infos: &[InputStreamInfo<'a>],
+    output_stream_info: OutputStreamInfo,
+    num_threads: u32,
+    expected_output_stream: &[i32],
+) {
     println!("instructions:");
     for instruction in instructions {
         println!("  {}", instruction);

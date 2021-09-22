@@ -1,7 +1,8 @@
+mod bit_vector;
 pub mod compiler;
-pub mod instructions;
+mod instructions;
 #[cfg(test)]
-pub mod test_helpers;
+mod test_helpers;
 
 #[cfg(test)]
 mod test {

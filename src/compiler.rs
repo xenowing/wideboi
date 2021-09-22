@@ -1,6 +1,9 @@
+use crate::bit_vector::*;
 use crate::instructions::*;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
+
+use self::ir::VariableIndex;
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -144,23 +147,34 @@ mod ir {
             }
         }
 
-        pub fn alloc_temp(&mut self) -> String {
-            let name = format!("__temp_{}", self.variables.len());
-            self.variables.push(Variable::new(name.clone()));
-            name
+        pub fn alloc_temp(&mut self) -> VariableIndex {
+            let variable_index = self.variables.len();
+            let name = format!("__temp_{}", variable_index);
+            self.variables.push(Variable::new(name));
+            VariableIndex(variable_index as _)
         }
 
-        pub fn get_register(&self, variable_name: &str) -> Option<Register> {
-            self.variables.iter().find(|v| v.name == variable_name).unwrap().register
+        pub fn get_variable_index(&self, name: &str) -> Option<VariableIndex> {
+            self.variables.iter().enumerate().find_map(|(i, v)| {
+                if v.name == name { Some(VariableIndex(i as _)) } else { None }
+            })
+        }
+
+        pub fn get_variable_register(&self, variable_index: VariableIndex) -> Option<Register> {
+            self.variables[variable_index.0 as usize].register
+        }
+
+        pub fn get_variable_register_mut(&mut self, variable_index: VariableIndex) -> &mut Option<Register> {
+            &mut self.variables[variable_index.0 as usize].register
         }
     }
 
     #[derive(Debug)]
     pub enum Statement {
-        Add(String, String, String),
-        Load(String, InputStream),
-        Mul(String, String, String),
-        Store(OutputStream, String),
+        Add(VariableIndex, VariableIndex, VariableIndex),
+        Load(VariableIndex, InputStream),
+        Mul(VariableIndex, VariableIndex, VariableIndex),
+        Store(OutputStream, VariableIndex),
     }
 
     #[derive(Debug)]
@@ -177,6 +191,9 @@ mod ir {
             }
         }
     }
+
+    #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    pub struct VariableIndex(pub u32);
 }
 
 pub fn compile(p: &program::Program) -> Result<Vec<Instruction>, CompileError> {
@@ -187,7 +204,7 @@ pub fn compile(p: &program::Program) -> Result<Vec<Instruction>, CompileError> {
 
     let (interference_edges, variable_degrees) = analyze_liveness(&program);
     println!("Interference edges: {:#?}", interference_edges);
-    println!("Variable degrees: {:#?}", variable_degrees);
+    println!("Variable degrees: {:#?}", p.variables.iter().zip(&variable_degrees).collect::<Vec<_>>());
 
     allocate_registers(&mut program, interference_edges, variable_degrees)?;
     println!("Register allocation result: {:#?}", program.variables);
@@ -209,7 +226,7 @@ fn parse(p: &program::Program, program: &mut ir::Program) {
 fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     match *s {
         program::Statement::Load(ref dst, src) => {
-            program.statements.push(ir::Statement::Load(dst.clone(), src))
+            program.statements.push(ir::Statement::Load(program.get_variable_index(dst).unwrap(), src))
         }
         program::Statement::Store(dst, ref src) => {
             let src = parse_scalar(src, program);
@@ -218,57 +235,53 @@ fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     }
 }
 
-fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> String {
+fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> ir::VariableIndex {
     match *s {
         program::Scalar::Add(ref lhs, ref rhs) => {
             let lhs = parse_scalar(lhs, program);
             let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Add(t.clone(), lhs, rhs));
+            program.statements.push(ir::Statement::Add(t, lhs, rhs));
             t
         }
         program::Scalar::Mul(ref lhs, ref rhs) => {
             let lhs = parse_scalar(lhs, program);
             let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Mul(t.clone(), lhs, rhs));
+            program.statements.push(ir::Statement::Mul(t, lhs, rhs));
             t
         }
         program::Scalar::VariableRef(ref src) => {
-            src.clone()
+            program.get_variable_index(src).unwrap()
         }
     }
 }
 
-fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(String, String)>, BTreeMap<String, u32>) {
-    let mut live_variables = BTreeSet::new();
+fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::VariableIndex)>, Vec<u32>) {
+    let mut is_live = BitVector::new(p.variables.len());
     let mut interference_edges = BTreeSet::new();
-    let mut variable_degrees = BTreeMap::new();
-
-    for v in &p.variables {
-        variable_degrees.insert(v.name.clone(), 0);
-    }
+    let mut variable_degrees = vec![0; p.variables.len()];
 
     for s in p.statements.iter().rev() {
         let (uses, def) = match *s {
-            ir::Statement::Add(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], Some(dst)),
-            ir::Statement::Mul(ref dst, ref lhs, ref rhs) => (vec![lhs.clone(), rhs.clone()], Some(dst)),
-            ir::Statement::Load(ref dst, _) => (Vec::new(), Some(dst)),
-            ir::Statement::Store(_, ref src) => (vec![src.clone()], None),
+            ir::Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
+            ir::Statement::Mul(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
+            ir::Statement::Load(dst, _) => (Vec::new(), Some(dst)),
+            ir::Statement::Store(_, src) => (vec![src], None),
         };
         if let Some(d) = def {
-            live_variables.remove(d);
+            is_live.clear(d.0 as _);
         }
         for u in uses {
-            live_variables.insert(u);
+            is_live.set(u.0 as _);
         }
-        for (i, x) in live_variables.iter().enumerate() {
-            for y in live_variables.iter().skip(i) {
-                let edge = (x.clone(), y.clone());
-
-                if interference_edges.insert(edge) {
-                    *variable_degrees.get_mut(x).unwrap() += 1;
-                    *variable_degrees.get_mut(y).unwrap() += 1;
+        let mut is_live_x_iter = is_live.iter_set_indices();
+        while let Some(x) = is_live_x_iter.next().map(|i| VariableIndex(i as _)) {
+            let mut is_live_y_iter = is_live_x_iter.clone();
+            while let Some(y) = is_live_y_iter.next().map(|i| VariableIndex(i as _)) {
+                if interference_edges.insert((x, y)) {
+                    variable_degrees[x.0 as usize] += 1;
+                    variable_degrees[y.0 as usize] += 1;
                 }
             }
         }
@@ -279,33 +292,31 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(String, String)>, BTreeMap<St
 
 fn allocate_registers(
     program: &mut ir::Program,
-    interference_edges: BTreeSet<(String, String)>,
-    variable_degrees: BTreeMap<String, u32>,
+    interference_edges: BTreeSet<(ir::VariableIndex, ir::VariableIndex)>,
+    variable_degrees: Vec<u32>,
 ) -> Result<(), CompileError> {
-    let mut remaining_variables = variable_degrees.into_iter().map(|(v, d)| (d, v)).collect::<Vec<_>>();
-    remaining_variables.sort();
-    let remaining_variables = remaining_variables.into_iter().map(|(_, v)| v).rev().collect::<Vec<_>>();
+    let mut sorted_variables =
+        variable_degrees.into_iter().enumerate().map(|(i, d)| (d, VariableIndex(i as _))).collect::<Vec<_>>();
+    sorted_variables.sort_by_key(|&(d, _)| d);
 
-    for v in remaining_variables {
+    for v in sorted_variables.into_iter().map(|(_, v)| v).rev() {
         let mut register_index = 0;
-        loop {
-            let mut bumped = false;
-            for (x, y) in interference_edges.iter().filter(|(x, y)| *x == v || *y == v) {
-                let other = if *x == v { y } else { x };
-                if let Some(other_register) = program.get_register(other) {
-                    if register_index == other_register as u32 {
-                        register_index += 1;
-                        bumped = true;
-                        break;
-                    }
-                }
-            }
-            if !bumped {
-                break;
-            }
+        while interference_edges.iter().filter_map(|(x, y)| if *x == v {
+            Some(*y)
+        } else if *y == v {
+            Some(*x)
+        } else {
+            None
+        }).any(|other| {
+            program
+                .get_variable_register(other)
+                .map(|r| r as u32 == register_index)
+                .unwrap_or(false)
+        }) {
+            register_index += 1;
         }
         let register = Register::from_u32(register_index).ok_or(CompileError::TooManyRegisters)?;
-        program.variables.iter_mut().find(|x| x.name == v).unwrap().register = Some(register);
+        *program.get_variable_register_mut(v) = Some(register);
     }
 
     Ok(())
@@ -313,24 +324,24 @@ fn allocate_registers(
 
 fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
     program.statements.iter().map(|s| match *s {
-        ir::Statement::Add(ref dst, ref lhs, ref rhs) => {
-            let dst = program.get_register(dst).unwrap();
-            let lhs = program.get_register(lhs).unwrap();
-            let rhs = program.get_register(rhs).unwrap();
+        ir::Statement::Add(dst, lhs, rhs) => {
+            let dst = program.get_variable_register(dst).unwrap();
+            let lhs = program.get_variable_register(lhs).unwrap();
+            let rhs = program.get_variable_register(rhs).unwrap();
             add(dst, lhs, rhs)
         }
-        ir::Statement::Mul(ref dst, ref lhs, ref rhs) => {
-            let dst = program.get_register(dst).unwrap();
-            let lhs = program.get_register(lhs).unwrap();
-            let rhs = program.get_register(rhs).unwrap();
+        ir::Statement::Mul(dst, lhs, rhs) => {
+            let dst = program.get_variable_register(dst).unwrap();
+            let lhs = program.get_variable_register(lhs).unwrap();
+            let rhs = program.get_variable_register(rhs).unwrap();
             mul(dst, lhs, rhs)
         }
-        ir::Statement::Load(ref dst, src) => {
-            let dst = program.get_register(dst).unwrap();
+        ir::Statement::Load(dst, src) => {
+            let dst = program.get_variable_register(dst).unwrap();
             lod(dst, src)
         }
-        ir::Statement::Store(dst, ref src) => {
-            let src = program.get_register(src).unwrap();
+        ir::Statement::Store(dst, src) => {
+            let src = program.get_variable_register(src).unwrap();
             str(dst, src)
         }
     }).collect()
