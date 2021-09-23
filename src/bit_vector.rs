@@ -1,8 +1,12 @@
-const STORAGE_ELEMENT_BITS: usize = 32;
+use std::mem::size_of;
+
+type StorageElement = u32;
+
+const STORAGE_ELEMENT_BITS: usize = size_of::<StorageElement>();
 
 pub struct BitVector {
     len: usize,
-    storage: Vec<u32>,
+    storage: Vec<StorageElement>,
 }
 
 impl BitVector {
@@ -63,7 +67,7 @@ impl<'a> Iterator for BitVectorSetIndexIterator<'a> {
     }
 }
 
-fn storage_index_and_mask(index: usize) -> (usize, u32) {
+fn storage_index_and_mask(index: usize) -> (usize, StorageElement) {
     let storage_index = index / STORAGE_ELEMENT_BITS;
     let bit_index = index % STORAGE_ELEMENT_BITS;
     let mask = 1 << bit_index;
