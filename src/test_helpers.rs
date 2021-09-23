@@ -13,11 +13,12 @@ pub struct OutputStreamInfo {
 }
 
 fn model<'a>(
-    instructions: &[Instruction],
+    encoded_instructions: &[EncodedInstruction],
     input_stream_infos: &[InputStreamInfo<'a>],
     output_stream_info: OutputStreamInfo,
     num_threads: u32,
 ) -> (Vec<i32>, u32) {
+    let instructions = encoded_instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
     let num_instructions = instructions.len() as u32;
     let mut output_stream = vec![0; output_stream_info.num_words as usize];
 
@@ -28,7 +29,7 @@ fn model<'a>(
         current_instruction: Option<Instruction>,
 
         pc: u32,
-        registers: [i32; 16],
+        registers: [i32; Register::VARIANT_COUNT],
         input_stream_offsets: Vec<u32>,
         output_stream_offset: u32,
     }
@@ -39,7 +40,7 @@ fn model<'a>(
                 current_instruction: None,
 
                 pc: 0,
-                registers: [0; 16],
+                registers: [0; Register::VARIANT_COUNT],
                 input_stream_offsets,
                 output_stream_offset: 0,
             }
@@ -73,7 +74,7 @@ fn model<'a>(
                     context.registers[dst as usize] = input_stream_infos[input_stream_index].data[context.input_stream_offsets[input_stream_index] as usize];
                     context.input_stream_offsets[input_stream_index] += 1;
                 }
-                Instruction::Mul(dst, lhs, rhs) => {
+                Instruction::Multiply(dst, lhs, rhs) => {
                     let lhs = context.registers[lhs as usize];
                     let rhs = context.registers[rhs as usize];
                     context.registers[dst as usize] = lhs.wrapping_mul(rhs);
@@ -128,24 +129,19 @@ fn model<'a>(
 }
 
 pub fn test<'a>(
-    instructions: &[Instruction],
+    encoded_instructions: &[EncodedInstruction],
     input_stream_infos: &[InputStreamInfo<'a>],
     output_stream_info: OutputStreamInfo,
     num_threads: u32,
     expected_output_stream: &[i32],
 ) {
-    println!("instructions:");
-    for instruction in instructions {
-        println!("  {}", instruction);
-    }
-
     println!("input stream infos: {:#?}", input_stream_infos);
     println!("output stream info: {:#?}", output_stream_info);
     println!("expected output stream: {:?}", expected_output_stream);
 
     println!("testing model");
 
-    let (output_stream, num_cycles) = model(&instructions, input_stream_infos, output_stream_info, num_threads);
+    let (output_stream, num_cycles) = model(&encoded_instructions, input_stream_infos, output_stream_info, num_threads);
     println!(" - output stream: {:?}", output_stream);
     println!(" - num cycles: {}", num_cycles);
 

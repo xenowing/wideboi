@@ -65,7 +65,7 @@ mod program {
     #[derive(Clone)]
     pub enum Scalar {
         Add(Box<Scalar>, Box<Scalar>),
-        Mul(Box<Scalar>, Box<Scalar>),
+        Multiply(Box<Scalar>, Box<Scalar>),
         VariableRef(String),
     }
 
@@ -81,7 +81,7 @@ mod program {
         type Output = Self;
 
         fn mul(self, other: Self) -> Self {
-            Self::Mul(Box::new(self), Box::new(other))
+            Self::Multiply(Box::new(self), Box::new(other))
         }
     }
 
@@ -173,7 +173,7 @@ mod ir {
     pub enum Statement {
         Add(VariableIndex, VariableIndex, VariableIndex),
         Load(VariableIndex, InputStream),
-        Mul(VariableIndex, VariableIndex, VariableIndex),
+        Multiply(VariableIndex, VariableIndex, VariableIndex),
         Store(OutputStream, VariableIndex),
     }
 
@@ -196,7 +196,7 @@ mod ir {
     pub struct VariableIndex(pub u32);
 }
 
-pub fn compile(p: &program::Program) -> Result<Vec<Instruction>, CompileError> {
+pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileError> {
     let mut program = ir::Program::new();
 
     parse(p, &mut program);
@@ -209,7 +209,19 @@ pub fn compile(p: &program::Program) -> Result<Vec<Instruction>, CompileError> {
     allocate_registers(&mut program, interference_edges, variable_degrees)?;
     println!("Register allocation result: {:#?}", program.variables);
 
-    Ok(generate_instructions(&program))
+    let instructions = generate_instructions(&program);
+    println!("Instructions:");
+    for instruction in &instructions {
+        println!("  {}", instruction);
+    }
+
+    let encoded_instructions = encode_instructions(&instructions);
+    println!("Encoded instructions:");
+    for &encoded_instruction in &encoded_instructions {
+        println!("  0x{:08x}", encoded_instruction);
+    }
+
+    Ok(encoded_instructions)
 }
 
 fn parse(p: &program::Program, program: &mut ir::Program) {
@@ -244,11 +256,11 @@ fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> ir::VariableI
             program.statements.push(ir::Statement::Add(t, lhs, rhs));
             t
         }
-        program::Scalar::Mul(ref lhs, ref rhs) => {
+        program::Scalar::Multiply(ref lhs, ref rhs) => {
             let lhs = parse_scalar(lhs, program);
             let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Mul(t, lhs, rhs));
+            program.statements.push(ir::Statement::Multiply(t, lhs, rhs));
             t
         }
         program::Scalar::VariableRef(ref src) => {
@@ -265,7 +277,7 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::Variab
     for s in p.statements.iter().rev() {
         let (uses, def) = match *s {
             ir::Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
-            ir::Statement::Mul(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
+            ir::Statement::Multiply(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
             ir::Statement::Load(dst, _) => (Vec::new(), Some(dst)),
             ir::Statement::Store(_, src) => (vec![src], None),
         };
@@ -330,7 +342,7 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
             let rhs = program.get_variable_register(rhs).unwrap();
             add(dst, lhs, rhs)
         }
-        ir::Statement::Mul(dst, lhs, rhs) => {
+        ir::Statement::Multiply(dst, lhs, rhs) => {
             let dst = program.get_variable_register(dst).unwrap();
             let lhs = program.get_variable_register(lhs).unwrap();
             let rhs = program.get_variable_register(rhs).unwrap();
@@ -342,9 +354,13 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
         }
         ir::Statement::Store(dst, src) => {
             let src = program.get_variable_register(src).unwrap();
-            str(dst, src)
+            sto(dst, src)
         }
     }).collect()
+}
+
+fn encode_instructions(instructions: &[Instruction]) -> Vec<EncodedInstruction> {
+    instructions.iter().map(|&i| i.encode()).collect()
 }
 
 #[cfg(test)]

@@ -1,6 +1,9 @@
+#[macro_use]
+extern crate static_assertions;
+
 mod bit_vector;
 pub mod compiler;
-mod instructions;
+pub mod instructions;
 #[cfg(test)]
 mod test_helpers;
 
@@ -16,8 +19,8 @@ mod test {
     fn id() {
         let instructions = vec![
             lod(R0, I0),
-            str(O0, R0),
-        ];
+            sto(O0, R0),
+        ].into_iter().map(|i| i.encode()).collect::<Vec<_>>();
 
         let num_elements = 10;
 
@@ -40,8 +43,8 @@ mod test {
         let instructions = vec![
             lod(R0, I0),
             add(R0, R0, R0),
-            str(O0, R0),
-        ];
+            sto(O0, R0),
+        ].into_iter().map(|i| i.encode()).collect::<Vec<_>>();
 
         let num_elements = 10;
 
