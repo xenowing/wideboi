@@ -104,7 +104,7 @@ const_assert!(Register::VARIANT_COUNT.is_power_of_two());
 pub enum Instruction {
     Add(Register, Register, Register),
     Load(Register, InputStream),
-    Multiply(Register, Register, Register),
+    Multiply(Register, Register, Register, u8),
     Store(OutputStream, Register),
 }
 
@@ -128,12 +128,13 @@ impl Instruction {
                 .set(&e.dst_reg, dst as _)
                 .set(&e.src_input_stream, src as _)
             }
-            Instruction::Multiply(dst, lhs, rhs) => {
+            Instruction::Multiply(dst, lhs, rhs, shift) => {
                 0
                 .set(&e.opcode, opcode as _)
                 .set(&e.dst_reg, dst as _)
                 .set(&e.lhs_reg, lhs as _)
                 .set(&e.rhs_reg, rhs as _)
+                .set(&e.shift, shift as _)
             }
             Instruction::Store(dst, src) => {
                 0
@@ -154,11 +155,12 @@ impl Instruction {
         let src_input_stream = InputStream::from_u32(i.value(&e.src_input_stream));
         let lhs_reg = Register::from_u32(i.value(&e.lhs_reg));
         let rhs_reg = Register::from_u32(i.value(&e.rhs_reg));
+        let shift = i.value(&e.shift) as u8 & SHIFT_FIELD_MASK;
 
         match opcode? {
             Opcode::Add => Some(Instruction::Add(dst_reg?, lhs_reg?, rhs_reg?)),
             Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?)),
-            Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?)),
+            Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?, shift)),
             Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?)),
         }
     }
@@ -168,7 +170,7 @@ impl Instruction {
         match self {
             Instruction::Add(_, _, _) => "add",
             Instruction::Load(_, _) => "lod",
-            Instruction::Multiply(_, _, _) => "mul",
+            Instruction::Multiply(_, _, _, _) => "mul",
             Instruction::Store(_, _) => "sto",
         }
     }
@@ -178,7 +180,7 @@ impl Instruction {
         match self {
             Instruction::Add(_, _, _) => Opcode::Add,
             Instruction::Load(_, _) => Opcode::Load,
-            Instruction::Multiply(_, _, _) => Opcode::Multiply,
+            Instruction::Multiply(_, _, _, _) => Opcode::Multiply,
             Instruction::Store(_, _) => Opcode::Store,
         }
     }
@@ -190,7 +192,7 @@ impl fmt::Display for Instruction {
         match *self {
             Instruction::Add(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
             Instruction::Load(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
-            Instruction::Multiply(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
+            Instruction::Multiply(dst, lhs, rhs, shift) => write!(f, "{} {}, {}, {}, {}", mnemonic, dst, lhs, rhs, shift),
             Instruction::Store(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
         }
     }
@@ -204,8 +206,8 @@ pub fn lod(dst: Register, src: InputStream) -> Instruction {
     Instruction::Load(dst, src)
 }
 
-pub fn mul(dst: Register, lhs: Register, rhs: Register) -> Instruction {
-    Instruction::Multiply(dst, lhs, rhs)
+pub fn mul(dst: Register, lhs: Register, rhs: Register, shift: u8) -> Instruction {
+    Instruction::Multiply(dst, lhs, rhs, shift & SHIFT_FIELD_MASK)
 }
 
 pub fn sto(dst: OutputStream, src: Register) -> Instruction {
@@ -234,6 +236,9 @@ impl Opcode {
 }
 
 const_assert_eq!(Opcode::VARIANT_COUNT, Instruction::VARIANT_COUNT);
+
+pub const SHIFT_FIELD_NUM_BITS: usize = 6;
+pub const SHIFT_FIELD_MASK: u8 = (1 << SHIFT_FIELD_NUM_BITS) - 1;
 
 pub type EncodedInstruction = u32;
 
@@ -308,6 +313,7 @@ pub struct Encoding {
     pub src_input_stream: Field,
     pub lhs_reg: Field,
     pub rhs_reg: Field,
+    pub shift: Field,
 }
 
 impl Encoding {
@@ -331,6 +337,7 @@ impl Encoding {
         let src_input_stream = src_reg.clone();
         let lhs_reg = src_reg.clone();
         let rhs_reg = f.field(reg_num_bits);
+        let shift = f.field(SHIFT_FIELD_NUM_BITS);
 
         Encoding {
             opcode,
@@ -340,6 +347,7 @@ impl Encoding {
             src_input_stream,
             lhs_reg,
             rhs_reg,
+            shift,
         }
     }
 }
@@ -368,8 +376,8 @@ mod test {
 
     #[test]
     fn assemble_and_roundtrip_mul() {
-        let i = mul(R3, R4, R5);
-        let e = Multiply(R3, R4, R5);
+        let i = mul(R3, R4, R5, 4);
+        let e = Multiply(R3, R4, R5, 4);
         assemble_and_roundtrip(i, e);
     }
 

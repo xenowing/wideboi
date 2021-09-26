@@ -16,7 +16,7 @@ pub enum CompileError {
 mod program {
     use crate::instructions::*;
 
-    use std::ops::{Add, Mul};
+    use std::ops::Add;
 
     pub struct Program {
         pub statements: Vec<Statement>,
@@ -65,8 +65,14 @@ mod program {
     #[derive(Clone)]
     pub enum Scalar {
         Add(Box<Scalar>, Box<Scalar>),
-        Multiply(Box<Scalar>, Box<Scalar>),
+        Multiply(Box<Scalar>, Box<Scalar>, u8),
         VariableRef(String),
+    }
+
+    impl Scalar {
+        pub fn mul(self, other: Scalar, shift: u8) -> Scalar {
+            Scalar::Multiply(Box::new(self), Box::new(other), shift & SHIFT_FIELD_MASK)
+        }
     }
 
     impl Add for Scalar {
@@ -74,14 +80,6 @@ mod program {
 
         fn add(self, other: Self) -> Self {
             Self::Add(Box::new(self), Box::new(other))
-        }
-    }
-
-    impl Mul for Scalar {
-        type Output = Self;
-
-        fn mul(self, other: Self) -> Self {
-            Self::Multiply(Box::new(self), Box::new(other))
         }
     }
 
@@ -98,9 +96,17 @@ mod program {
     }
 
     impl V3 {
-        pub fn dot(self, other: V3) -> Scalar {
-            let temp = self * other;
+        pub fn dot(self, other: V3, shift: u8) -> Scalar {
+            let temp = self.mul(other, shift);
             temp.x + temp.y + temp.z
+        }
+
+        pub fn mul(self, other: V3, shift: u8) -> V3 {
+            Self {
+                x: self.x.mul(other.x, shift),
+                y: self.y.mul(other.y, shift),
+                z: self.z.mul(other.z, shift),
+            }
         }
     }
 
@@ -112,18 +118,6 @@ mod program {
                 x: self.x + other.x,
                 y: self.y + other.y,
                 z: self.z + other.z,
-            }
-        }
-    }
-
-    impl Mul for V3 {
-        type Output = Self;
-
-        fn mul(self, other: Self) -> Self {
-            Self {
-                x: self.x * other.x,
-                y: self.y * other.y,
-                z: self.z * other.z,
             }
         }
     }
@@ -173,7 +167,7 @@ mod ir {
     pub enum Statement {
         Add(VariableIndex, VariableIndex, VariableIndex),
         Load(VariableIndex, InputStream),
-        Multiply(VariableIndex, VariableIndex, VariableIndex),
+        Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
         Store(OutputStream, VariableIndex),
     }
 
@@ -256,11 +250,11 @@ fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> ir::VariableI
             program.statements.push(ir::Statement::Add(t, lhs, rhs));
             t
         }
-        program::Scalar::Multiply(ref lhs, ref rhs) => {
+        program::Scalar::Multiply(ref lhs, ref rhs, shift) => {
             let lhs = parse_scalar(lhs, program);
             let rhs = parse_scalar(rhs, program);
             let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Multiply(t, lhs, rhs));
+            program.statements.push(ir::Statement::Multiply(t, lhs, rhs, shift));
             t
         }
         program::Scalar::VariableRef(ref src) => {
@@ -277,7 +271,7 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::Variab
     for s in p.statements.iter().rev() {
         let (uses, def) = match *s {
             ir::Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
-            ir::Statement::Multiply(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
+            ir::Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
             ir::Statement::Load(dst, _) => (Vec::new(), Some(dst)),
             ir::Statement::Store(_, src) => (vec![src], None),
         };
@@ -342,11 +336,11 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
             let rhs = program.get_variable_register(rhs).unwrap();
             add(dst, lhs, rhs)
         }
-        ir::Statement::Multiply(dst, lhs, rhs) => {
+        ir::Statement::Multiply(dst, lhs, rhs, shift) => {
             let dst = program.get_variable_register(dst).unwrap();
             let lhs = program.get_variable_register(lhs).unwrap();
             let rhs = program.get_variable_register(rhs).unwrap();
-            mul(dst, lhs, rhs)
+            mul(dst, lhs, rhs, shift)
         }
         ir::Statement::Load(dst, src) => {
             let dst = program.get_variable_register(dst).unwrap();
@@ -474,7 +468,7 @@ mod test {
         let output = O0;
         let x = p.load_s(input_x);
         let y = p.load_s(input_y);
-        p.store_s(output, x * y);
+        p.store_s(output, x.mul(y, 0));
 
         let instructions = compile(&p)?;
 
@@ -546,7 +540,7 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_v3(output, x * y);
+        p.store_v3(output, x.mul(y, 0));
 
         let instructions = compile(&p)?;
 
@@ -586,7 +580,7 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_s(output, x.dot(y));
+        p.store_s(output, x.dot(y, 0));
 
         let instructions = compile(&p)?;
 
@@ -598,6 +592,62 @@ mod test {
             input_stream_x_v3.iter()
             .zip(input_stream_y_v3.iter())
             .map(|(x, y)| (x[0] * y[0]) + (x[1] * y[1]) + (x[2] * y[2]))
+            .collect::<Vec<_>>();
+        let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
+        let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
+
+        test(&instructions, &[
+            InputStreamInfo {
+                data: &input_stream_x,
+                thread_stride: 3,
+            },
+            InputStreamInfo {
+                data: &input_stream_y,
+                thread_stride: 3,
+            },
+        ], OutputStreamInfo {
+            num_words: num_elements as _,
+            thread_stride: 1,
+        }, num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn vector_dots_q() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let q_shift = 16;
+
+        let input_x = I0;
+        let input_y = I1;
+        let output = O0;
+        let x = p.load_v3(input_x);
+        let y = p.load_v3(input_y);
+        p.store_s(output, x.dot(y, q_shift));
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream_x_v3 = (0..num_elements).into_iter().map(|x| [
+            (x * 1 + 0) << q_shift,
+            (x * 1 + 1) << q_shift,
+            (x * 1 + 2) << q_shift,
+        ]).collect::<Vec<_>>();
+        let input_stream_y_v3 = (0..num_elements).into_iter().map(|x| [
+            (x * 2 + 0) << q_shift,
+            (x * 2 + 1) << q_shift,
+            (x * 2 + 2) << q_shift,
+        ]).collect::<Vec<_>>();
+        let expected_output_stream =
+            input_stream_x_v3.iter()
+            .zip(input_stream_y_v3.iter())
+            .map(|(x, y)|
+                (((x[0] as i64 * y[0] as i64) >> q_shift) as i32) +
+                (((x[1] as i64 * y[1] as i64) >> q_shift) as i32) +
+                (((x[2] as i64 * y[2] as i64) >> q_shift) as i32)
+            )
             .collect::<Vec<_>>();
         let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
         let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
