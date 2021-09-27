@@ -3,7 +3,7 @@ use variant_count::*;
 use std::fmt;
 use std::mem::size_of;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, VariantCount)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, VariantCount)]
 pub enum InputStream {
     I0,
     I1,

@@ -1,8 +1,9 @@
 use crate::bit_vector::*;
 use crate::instructions::*;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
+use self::ir::NodeIndex;
 use self::ir::VariableIndex;
 
 #[derive(Debug)]
@@ -121,6 +122,8 @@ mod program {
 mod ir {
     use super::*;
 
+    use std::cell::Cell;
+
     #[derive(Debug)]
     pub struct Program {
         pub statements: Vec<Statement>,
@@ -128,23 +131,58 @@ mod ir {
     }
 
     impl Program {
-        pub fn new() -> Program {
+        pub fn new(num_variables: u32) -> Program {
             Program {
                 statements: Vec::new(),
-                variable_registers: Vec::new(),
+                variable_registers: vec![None; num_variables as usize],
             }
         }
 
-        pub fn get_variable_register(&self, variable_index: VariableIndex) -> Option<Register> {
+        pub fn reg(&self, variable_index: VariableIndex) -> Option<Register> {
             self.variable_registers[variable_index.0 as usize]
-        }
-
-        pub fn get_variable_register_mut(&mut self, variable_index: VariableIndex) -> &mut Option<Register> {
-            &mut self.variable_registers[variable_index.0 as usize]
         }
     }
 
     #[derive(Debug)]
+    pub struct Ddg {
+        pub nodes: Vec<Node>,
+        pub variable_def_nodes: Vec<Option<NodeIndex>>,
+        pub previous_input_stream_nodes: HashMap<InputStream, NodeIndex>,
+        pub output_stream_nodes: Vec<NodeIndex>,
+    }
+
+    impl Ddg {
+        pub fn new(num_variables: u32) -> Ddg {
+            Ddg {
+                nodes: Vec::new(),
+                variable_def_nodes: vec![None; num_variables as usize],
+                previous_input_stream_nodes: HashMap::new(),
+                output_stream_nodes: Vec::new(),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Node {
+        pub statement: Statement,
+        pub predecessors: Vec<NodeIndex>,
+        pub is_scheduled: Cell<bool>,
+    }
+
+    impl Node {
+        pub fn new(statement: Statement, predecessors: Vec<NodeIndex>) -> Node {
+            Node {
+                statement,
+                predecessors,
+                is_scheduled: Cell::new(false),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    pub struct NodeIndex(pub u32);
+
+    #[derive(Debug, Clone, Copy)]
     pub enum Statement {
         Add(VariableIndex, VariableIndex, VariableIndex),
         Load(VariableIndex, InputStream),
@@ -163,10 +201,16 @@ mod ir {
 }
 
 pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileError> {
-    let mut program = ir::Program::new();
+    let ddg = construct_ddg(p);
+    println!("Directed dependency graph: {:#?}", ddg);
 
-    parse(p, &mut program);
-    println!("Parse result: {:#?}", program);
+    let mut program = ir::Program::new(p.num_variables);
+
+    schedule(&ddg, &mut program);
+    println!("Schedule:");
+    for statement in &program.statements {
+        println!("  {:?}", statement);
+    }
 
     let (interference_edges, variable_degrees) = analyze_liveness(&program);
     println!("Interference edges: {:#?}", interference_edges);
@@ -190,42 +234,115 @@ pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileE
     Ok(encoded_instructions)
 }
 
-fn parse(p: &program::Program, program: &mut ir::Program) {
-    program.variable_registers = vec![None; p.num_variables as usize];
+fn construct_ddg(p: &program::Program) -> ir::Ddg {
+    let mut ddg = ir::Ddg::new(p.num_variables);
 
     for s in &p.statements {
-        parse_statement(s, program);
+        visit_statement(s, &mut ddg);
     }
+
+    ddg
 }
 
-fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
-    match *s {
+fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
+    let index = ir::NodeIndex(ddg.nodes.len() as _);
+
+    let (n, v) = match *s {
         program::Statement::Add(dst, ref lhs, ref rhs) => {
-            let lhs = parse_scalar(lhs);
-            let rhs = parse_scalar(rhs);
-            program.statements.push(ir::Statement::Add(dst.into(), lhs, rhs));
+            let (lhs, lhs_p) = visit_scalar(lhs, ddg);
+            let (rhs, rhs_p) = visit_scalar(rhs, ddg);
+            (
+                ir::Node::new(
+                    ir::Statement::Add(dst.into(), lhs, rhs),
+                    vec![lhs_p, rhs_p],
+                ),
+                Some(dst),
+            )
         }
         program::Statement::Load(dst, src) => {
-            program.statements.push(ir::Statement::Load(dst.into(), src))
+            (
+                ir::Node::new(
+                    ir::Statement::Load(dst.into(), src),
+                    if let Some(p) = ddg.previous_input_stream_nodes.insert(src, index) {
+                        vec![p]
+                    } else {
+                        Vec::new()
+                    },
+                ),
+                Some(dst),
+            )
         }
         program::Statement::Multiply(dst, ref lhs, ref rhs, shift) => {
-            let lhs = parse_scalar(lhs);
-            let rhs = parse_scalar(rhs);
-            program.statements.push(ir::Statement::Multiply(dst.into(), lhs, rhs, shift));
+            let (lhs, lhs_p) = visit_scalar(lhs, ddg);
+            let (rhs, rhs_p) = visit_scalar(rhs, ddg);
+            (
+                ir::Node::new(
+                    ir::Statement::Multiply(dst.into(), lhs, rhs, shift),
+                    vec![lhs_p, rhs_p],
+                ),
+                Some(dst)
+            )
         }
         program::Statement::Store(dst, ref src) => {
-            let src = parse_scalar(src);
-            program.statements.push(ir::Statement::Store(dst, src))
+            let (src, src_p) = visit_scalar(src, ddg);
+            let ret = (
+                ir::Node::new(
+                    ir::Statement::Store(dst, src),
+                    if let Some(&p) = ddg.output_stream_nodes.last() {
+                        vec![src_p, p]
+                    } else {
+                        vec![src_p]
+                    },
+                ),
+                None,
+            );
+            ddg.output_stream_nodes.push(index);
+            ret
+        }
+    };
+
+    ddg.nodes.push(n);
+    if let Some(v) = v {
+        ddg.variable_def_nodes[v.0 as usize] = Some(index);
+    }
+}
+
+fn visit_scalar(s: &program::Scalar, ddg: &ir::Ddg) -> (ir::VariableIndex, NodeIndex) {
+    match *s {
+        program::Scalar::VariableRef(src) => {
+            (src.into(), ddg.variable_def_nodes[src.0 as usize].unwrap())
         }
     }
 }
 
-fn parse_scalar(s: &program::Scalar) -> ir::VariableIndex {
-    match *s {
-        program::Scalar::VariableRef(src) => {
-            src.into()
+fn schedule(ddg: &ir::Ddg, program: &mut ir::Program) {
+    assert!(try_schedule_predecessors(&ddg.output_stream_nodes, ddg, program));
+}
+
+fn try_schedule_predecessors(predecessors: &[NodeIndex], ddg: &ir::Ddg, program: &mut ir::Program) -> bool {
+    loop {
+        let mut has_progressed = false;
+        for &p in predecessors {
+            if let Some(predecessor_has_progressed) = try_schedule_node(p, ddg, program) {
+                has_progressed |= predecessor_has_progressed;
+            }
+        }
+        if !has_progressed {
+            return predecessors.iter().all(|&p| ddg.nodes[p.0 as usize].is_scheduled.get());
         }
     }
+}
+
+fn try_schedule_node(n: NodeIndex, ddg: &ir::Ddg, program: &mut ir::Program) -> Option<bool> {
+    if ddg.nodes[n.0 as usize].is_scheduled.get() {
+        return Some(false);
+    }
+    if !try_schedule_predecessors(&ddg.nodes[n.0 as usize].predecessors, ddg, program) {
+        return None;
+    }
+    program.statements.push(ddg.nodes[n.0 as usize].statement);
+    ddg.nodes[n.0 as usize].is_scheduled.set(true);
+    Some(true)
 }
 
 fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::VariableIndex)>, Vec<u32>) {
@@ -280,14 +397,14 @@ fn allocate_registers(
             None
         }).any(|other| {
             program
-                .get_variable_register(other)
+                .reg(other)
                 .map(|r| r as u32 == register_index)
                 .unwrap_or(false)
         }) {
             register_index += 1;
         }
         let register = Register::from_u32(register_index).ok_or(CompileError::TooManyRegisters)?;
-        *program.get_variable_register_mut(v) = Some(register);
+        program.variable_registers[v.0 as usize] = Some(register);
     }
 
     Ok(())
@@ -296,23 +413,23 @@ fn allocate_registers(
 fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
     program.statements.iter().map(|s| match *s {
         ir::Statement::Add(dst, lhs, rhs) => {
-            let dst = program.get_variable_register(dst).unwrap();
-            let lhs = program.get_variable_register(lhs).unwrap();
-            let rhs = program.get_variable_register(rhs).unwrap();
+            let dst = program.reg(dst).unwrap();
+            let lhs = program.reg(lhs).unwrap();
+            let rhs = program.reg(rhs).unwrap();
             add(dst, lhs, rhs)
         }
         ir::Statement::Multiply(dst, lhs, rhs, shift) => {
-            let dst = program.get_variable_register(dst).unwrap();
-            let lhs = program.get_variable_register(lhs).unwrap();
-            let rhs = program.get_variable_register(rhs).unwrap();
+            let dst = program.reg(dst).unwrap();
+            let lhs = program.reg(lhs).unwrap();
+            let rhs = program.reg(rhs).unwrap();
             mul(dst, lhs, rhs, shift)
         }
         ir::Statement::Load(dst, src) => {
-            let dst = program.get_variable_register(dst).unwrap();
+            let dst = program.reg(dst).unwrap();
             lod(dst, src)
         }
         ir::Statement::Store(dst, src) => {
-            let src = program.get_variable_register(src).unwrap();
+            let src = program.reg(src).unwrap();
             sto(dst, src)
         }
     }).collect()
