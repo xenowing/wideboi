@@ -16,24 +16,48 @@ pub enum CompileError {
 mod program {
     use crate::instructions::*;
 
-    use std::ops::Add;
-
     pub struct Program {
         pub statements: Vec<Statement>,
-        pub variables: Vec<String>,
+        pub num_variables: u32,
     }
 
     impl Program {
         pub fn new() -> Program {
             Program {
                 statements: Vec::new(),
-                variables: Vec::new(),
+                num_variables: 0,
             }
         }
 
+        pub fn add_s(&mut self, lhs: Scalar, rhs: Scalar) -> Scalar {
+            let t = self.alloc_var();
+            self.statements.push(Statement::Add(t, lhs, rhs));
+            Scalar::VariableRef(t)
+        }
+
+        pub fn add_v3(&mut self, lhs: V3, rhs: V3) -> V3 {
+            V3 {
+                x: self.add_s(lhs.x, rhs.x),
+                y: self.add_s(lhs.y, rhs.y),
+                z: self.add_s(lhs.z, rhs.z),
+            }
+        }
+
+        fn alloc_var(&mut self) -> VariableIndex {
+            let ret = VariableIndex(self.num_variables);
+            self.num_variables += 1;
+            ret
+        }
+
+        pub fn dot(&mut self, lhs: V3, rhs: V3, shift: u8) -> Scalar {
+            let temp = self.mul_v3(lhs, rhs, shift);
+            let lhs = self.add_s(temp.x, temp.y);
+            self.add_s(lhs, temp.z)
+        }
+
         pub fn load_s(&mut self, src: InputStream) -> Scalar {
-            let name = self.temp_var();
-            self.statements.push(Statement::Load(name.clone(), src));
+            let name = self.alloc_var();
+            self.statements.push(Statement::Load(name, src));
             Scalar::VariableRef(name)
         }
 
@@ -42,6 +66,20 @@ mod program {
                 x: self.load_s(src),
                 y: self.load_s(src),
                 z: self.load_s(src),
+            }
+        }
+
+        pub fn mul_s(&mut self, lhs: Scalar, rhs: Scalar, shift: u8) -> Scalar {
+            let t = self.alloc_var();
+            self.statements.push(Statement::Multiply(t, lhs, rhs, shift & SHIFT_FIELD_MASK));
+            Scalar::VariableRef(t)
+        }
+
+        pub fn mul_v3(&mut self, lhs: V3, rhs: V3, shift: u8) -> V3 {
+            V3 {
+                x: self.mul_s(lhs.x, rhs.x, shift),
+                y: self.mul_s(lhs.y, rhs.y, shift),
+                z: self.mul_s(lhs.z, rhs.z, shift),
             }
         }
 
@@ -54,37 +92,17 @@ mod program {
             self.store_s(dst, src.y);
             self.store_s(dst, src.z);
         }
-
-        fn temp_var(&mut self) -> String {
-            let name = format!("__temp_{}", self.variables.len());
-            self.variables.push(name.clone());
-            name
-        }
     }
 
     #[derive(Clone)]
     pub enum Scalar {
-        Add(Box<Scalar>, Box<Scalar>),
-        Multiply(Box<Scalar>, Box<Scalar>, u8),
-        VariableRef(String),
-    }
-
-    impl Scalar {
-        pub fn mul(self, other: Scalar, shift: u8) -> Scalar {
-            Scalar::Multiply(Box::new(self), Box::new(other), shift & SHIFT_FIELD_MASK)
-        }
-    }
-
-    impl Add for Scalar {
-        type Output = Self;
-
-        fn add(self, other: Self) -> Self {
-            Self::Add(Box::new(self), Box::new(other))
-        }
+        VariableRef(VariableIndex),
     }
 
     pub enum Statement {
-        Load(String, InputStream),
+        Add(VariableIndex, Scalar, Scalar),
+        Load(VariableIndex, InputStream),
+        Multiply(VariableIndex, Scalar, Scalar, u8),
         Store(OutputStream, Scalar),
     }
 
@@ -95,71 +113,34 @@ mod program {
         pub z: Scalar,
     }
 
-    impl V3 {
-        pub fn dot(self, other: V3, shift: u8) -> Scalar {
-            let temp = self.mul(other, shift);
-            temp.x + temp.y + temp.z
-        }
-
-        pub fn mul(self, other: V3, shift: u8) -> V3 {
-            Self {
-                x: self.x.mul(other.x, shift),
-                y: self.y.mul(other.y, shift),
-                z: self.z.mul(other.z, shift),
-            }
-        }
-    }
-
-    impl Add for V3 {
-        type Output = Self;
-
-        fn add(self, other: Self) -> Self {
-            Self {
-                x: self.x + other.x,
-                y: self.y + other.y,
-                z: self.z + other.z,
-            }
-        }
-    }
+    #[derive(Clone, Copy)]
+    pub struct VariableIndex(pub u32);
 }
 
 // TODO: Move?
 mod ir {
-    use crate::instructions::*;
+    use super::*;
 
     #[derive(Debug)]
     pub struct Program {
         pub statements: Vec<Statement>,
-        pub variables: Vec<Variable>,
+        pub variable_registers: Vec<Option<Register>>,
     }
 
     impl Program {
         pub fn new() -> Program {
             Program {
                 statements: Vec::new(),
-                variables: Vec::new(),
+                variable_registers: Vec::new(),
             }
         }
 
-        pub fn alloc_temp(&mut self) -> VariableIndex {
-            let variable_index = self.variables.len();
-            let name = format!("__temp_{}", variable_index);
-            self.variables.push(Variable::new(name));
-            VariableIndex(variable_index as _)
-        }
-
-        pub fn get_variable_index(&self, name: &str) -> Option<VariableIndex> {
-            self.variables.iter().enumerate().find_map(|(i, v)| {
-                if v.name == name { Some(VariableIndex(i as _)) } else { None }
-            })
-        }
-
         pub fn get_variable_register(&self, variable_index: VariableIndex) -> Option<Register> {
-            self.variables[variable_index.0 as usize].register
+            self.variable_registers[variable_index.0 as usize]
         }
 
         pub fn get_variable_register_mut(&mut self, variable_index: VariableIndex) -> &mut Option<Register> {
-            &mut self.variables[variable_index.0 as usize].register
+            &mut self.variable_registers[variable_index.0 as usize]
         }
     }
 
@@ -171,23 +152,14 @@ mod ir {
         Store(OutputStream, VariableIndex),
     }
 
-    #[derive(Debug)]
-    pub struct Variable {
-        pub name: String,
-        pub register: Option<Register>,
-    }
-
-    impl Variable {
-        pub fn new(name: String) -> Variable {
-            Variable {
-                name,
-                register: None,
-            }
-        }
-    }
-
     #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
     pub struct VariableIndex(pub u32);
+
+    impl From<program::VariableIndex> for VariableIndex {
+        fn from(i: program::VariableIndex) -> Self {
+            Self(i.0)
+        }
+    }
 }
 
 pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileError> {
@@ -198,10 +170,10 @@ pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileE
 
     let (interference_edges, variable_degrees) = analyze_liveness(&program);
     println!("Interference edges: {:#?}", interference_edges);
-    println!("Variable degrees: {:#?}", p.variables.iter().zip(&variable_degrees).collect::<Vec<_>>());
+    println!("Variable degrees: {:#?}", variable_degrees.iter().enumerate().collect::<Vec<_>>());
 
     allocate_registers(&mut program, interference_edges, variable_degrees)?;
-    println!("Register allocation result: {:#?}", program.variables);
+    println!("Variable registers: {:#?}", program.variable_registers);
 
     let instructions = generate_instructions(&program);
     println!("Instructions:");
@@ -219,10 +191,7 @@ pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileE
 }
 
 fn parse(p: &program::Program, program: &mut ir::Program) {
-    for v in &p.variables {
-        // TODO: Validity check(s) etc
-        program.variables.push(ir::Variable::new(v.clone()));
-    }
+    program.variable_registers = vec![None; p.num_variables as usize];
 
     for s in &p.statements {
         parse_statement(s, program);
@@ -231,42 +200,38 @@ fn parse(p: &program::Program, program: &mut ir::Program) {
 
 fn parse_statement(s: &program::Statement, program: &mut ir::Program) {
     match *s {
-        program::Statement::Load(ref dst, src) => {
-            program.statements.push(ir::Statement::Load(program.get_variable_index(dst).unwrap(), src))
+        program::Statement::Add(dst, ref lhs, ref rhs) => {
+            let lhs = parse_scalar(lhs);
+            let rhs = parse_scalar(rhs);
+            program.statements.push(ir::Statement::Add(dst.into(), lhs, rhs));
+        }
+        program::Statement::Load(dst, src) => {
+            program.statements.push(ir::Statement::Load(dst.into(), src))
+        }
+        program::Statement::Multiply(dst, ref lhs, ref rhs, shift) => {
+            let lhs = parse_scalar(lhs);
+            let rhs = parse_scalar(rhs);
+            program.statements.push(ir::Statement::Multiply(dst.into(), lhs, rhs, shift));
         }
         program::Statement::Store(dst, ref src) => {
-            let src = parse_scalar(src, program);
+            let src = parse_scalar(src);
             program.statements.push(ir::Statement::Store(dst, src))
         }
     }
 }
 
-fn parse_scalar(s: &program::Scalar, program: &mut ir::Program) -> ir::VariableIndex {
+fn parse_scalar(s: &program::Scalar) -> ir::VariableIndex {
     match *s {
-        program::Scalar::Add(ref lhs, ref rhs) => {
-            let lhs = parse_scalar(lhs, program);
-            let rhs = parse_scalar(rhs, program);
-            let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Add(t, lhs, rhs));
-            t
-        }
-        program::Scalar::Multiply(ref lhs, ref rhs, shift) => {
-            let lhs = parse_scalar(lhs, program);
-            let rhs = parse_scalar(rhs, program);
-            let t = program.alloc_temp();
-            program.statements.push(ir::Statement::Multiply(t, lhs, rhs, shift));
-            t
-        }
-        program::Scalar::VariableRef(ref src) => {
-            program.get_variable_index(src).unwrap()
+        program::Scalar::VariableRef(src) => {
+            src.into()
         }
     }
 }
 
 fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::VariableIndex)>, Vec<u32>) {
-    let mut is_live = BitVector::new(p.variables.len());
+    let mut is_live = BitVector::new(p.variable_registers.len());
     let mut interference_edges = BTreeSet::new();
-    let mut variable_degrees = vec![0; p.variables.len()];
+    let mut variable_degrees = vec![0; p.variable_registers.len()];
 
     for s in p.statements.iter().rev() {
         let (uses, def) = match *s {
@@ -401,7 +366,8 @@ mod test {
         let input = I0;
         let output = O0;
         let x = p.load_s(input);
-        p.store_s(output, x.clone() + x);
+        let res = p.add_s(x.clone(), x);
+        p.store_s(output, res);
 
         let instructions = compile(&p)?;
 
@@ -432,7 +398,8 @@ mod test {
         let output = O0;
         let x = p.load_s(input_x);
         let y = p.load_s(input_y);
-        p.store_s(output, x + y);
+        let res = p.add_s(x, y);
+        p.store_s(output, res);
 
         let instructions = compile(&p)?;
 
@@ -468,7 +435,8 @@ mod test {
         let output = O0;
         let x = p.load_s(input_x);
         let y = p.load_s(input_y);
-        p.store_s(output, x.mul(y, 0));
+        let res = p.mul_s(x, y, 0);
+        p.store_s(output, res);
 
         let instructions = compile(&p)?;
 
@@ -504,7 +472,8 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_v3(output, x + y);
+        let res = p.add_v3(x, y);
+        p.store_v3(output, res);
 
         let instructions = compile(&p)?;
 
@@ -540,7 +509,8 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_v3(output, x.mul(y, 0));
+        let res = p.mul_v3(x, y, 0);
+        p.store_v3(output, res);
 
         let instructions = compile(&p)?;
 
@@ -580,7 +550,8 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_s(output, x.dot(y, 0));
+        let res = p.dot(x, y, 0);
+        p.store_s(output, res);
 
         let instructions = compile(&p)?;
 
@@ -624,7 +595,8 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        p.store_s(output, x.dot(y, q_shift));
+        let res = p.dot(x, y, q_shift);
+        p.store_s(output, res);
 
         let instructions = compile(&p)?;
 
