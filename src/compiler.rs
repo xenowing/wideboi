@@ -15,11 +15,13 @@ pub enum CompileError {
 
 // TODO: Move?
 mod program {
-    use crate::instructions::*;
+    use super::*;
 
     pub struct Program {
         pub statements: Vec<Statement>,
         pub num_variables: u32,
+        pub num_input_stream_loads: HashMap<InputStream, u32>,
+        pub num_output_stream_stores: u32,
     }
 
     impl Program {
@@ -27,6 +29,8 @@ mod program {
             Program {
                 statements: Vec::new(),
                 num_variables: 0,
+                num_input_stream_loads: HashMap::new(),
+                num_output_stream_stores: 0,
             }
         }
 
@@ -58,7 +62,11 @@ mod program {
 
         pub fn load_s(&mut self, src: InputStream) -> Scalar {
             let name = self.alloc_var();
-            self.statements.push(Statement::Load(name, src));
+            // TODO: Limit loads based on offset field bits
+            let loads = self.num_input_stream_loads.entry(src).or_insert(0);
+            let offset = *loads;
+            *loads += 1;
+            self.statements.push(Statement::Load(name, src, offset as _));
             Scalar::VariableRef(name)
         }
 
@@ -85,7 +93,10 @@ mod program {
         }
 
         pub fn store_s(&mut self, dst: OutputStream, src: Scalar) {
-            self.statements.push(Statement::Store(dst, src));
+            // TODO: Limit stores based on offset field bits
+            let offset = self.num_output_stream_stores;
+            self.num_output_stream_stores += 1;
+            self.statements.push(Statement::Store(dst, src, offset as _));
         }
 
         pub fn store_v3(&mut self, dst: OutputStream, src: V3) {
@@ -102,9 +113,9 @@ mod program {
 
     pub enum Statement {
         Add(VariableIndex, Scalar, Scalar),
-        Load(VariableIndex, InputStream),
+        Load(VariableIndex, InputStream, u8),
         Multiply(VariableIndex, Scalar, Scalar, u8),
-        Store(OutputStream, Scalar),
+        Store(OutputStream, Scalar, u8),
     }
 
     #[derive(Clone)]
@@ -147,7 +158,6 @@ mod ir {
     pub struct Ddg {
         pub nodes: Vec<Node>,
         pub variable_def_nodes: Vec<Option<NodeIndex>>,
-        pub previous_input_stream_nodes: HashMap<InputStream, NodeIndex>,
         pub output_stream_nodes: Vec<NodeIndex>,
     }
 
@@ -156,7 +166,6 @@ mod ir {
             Ddg {
                 nodes: Vec::new(),
                 variable_def_nodes: vec![None; num_variables as usize],
-                previous_input_stream_nodes: HashMap::new(),
                 output_stream_nodes: Vec::new(),
             }
         }
@@ -185,9 +194,9 @@ mod ir {
     #[derive(Debug, Clone, Copy)]
     pub enum Statement {
         Add(VariableIndex, VariableIndex, VariableIndex),
-        Load(VariableIndex, InputStream),
+        Load(VariableIndex, InputStream, u8),
         Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
-        Store(OutputStream, VariableIndex),
+        Store(OutputStream, VariableIndex, u8),
     }
 
     #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -259,15 +268,11 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
                 Some(dst),
             )
         }
-        program::Statement::Load(dst, src) => {
+        program::Statement::Load(dst, src, offset) => {
             (
                 ir::Node::new(
-                    ir::Statement::Load(dst.into(), src),
-                    if let Some(p) = ddg.previous_input_stream_nodes.insert(src, index) {
-                        vec![p]
-                    } else {
-                        Vec::new()
-                    },
+                    ir::Statement::Load(dst.into(), src, offset),
+                    Vec::new(),
                 ),
                 Some(dst),
             )
@@ -283,16 +288,12 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
                 Some(dst)
             )
         }
-        program::Statement::Store(dst, ref src) => {
+        program::Statement::Store(dst, ref src, offset) => {
             let (src, src_p) = visit_scalar(src, ddg);
             let ret = (
                 ir::Node::new(
-                    ir::Statement::Store(dst, src),
-                    if let Some(&p) = ddg.output_stream_nodes.last() {
-                        vec![src_p, p]
-                    } else {
-                        vec![src_p]
-                    },
+                    ir::Statement::Store(dst, src, offset),
+                    vec![src_p],
                 ),
                 None,
             );
@@ -354,8 +355,8 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::Variab
         let (uses, def) = match *s {
             ir::Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
             ir::Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
-            ir::Statement::Load(dst, _) => (Vec::new(), Some(dst)),
-            ir::Statement::Store(_, src) => (vec![src], None),
+            ir::Statement::Load(dst, _, _) => (Vec::new(), Some(dst)),
+            ir::Statement::Store(_, src, _) => (vec![src], None),
         };
         if let Some(d) = def {
             is_live.clear(d.0 as _);
@@ -424,13 +425,13 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
             let rhs = program.reg(rhs).unwrap();
             mul(dst, lhs, rhs, shift)
         }
-        ir::Statement::Load(dst, src) => {
+        ir::Statement::Load(dst, src, offset) => {
             let dst = program.reg(dst).unwrap();
-            lod(dst, src)
+            lod(dst, src, offset)
         }
-        ir::Statement::Store(dst, src) => {
+        ir::Statement::Store(dst, src, offset) => {
             let src = program.reg(src).unwrap();
-            sto(dst, src)
+            sto(dst, src, offset)
         }
     }).collect()
 }
@@ -749,6 +750,40 @@ mod test {
             InputStreamInfo {
                 data: &input_stream_y,
                 thread_stride: 3,
+            },
+        ], OutputStreamInfo {
+            num_words: num_elements as _,
+            thread_stride: 1,
+        }, num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn dead_scalar_loads() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let input = I0;
+        let output = O0;
+        let x = p.load_s(input);
+        let y = p.load_s(input);
+        let _z = p.load_s(input);
+        let w = p.load_s(input);
+        let lhs = p.add_s(x, y);
+        let res = p.add_s(lhs, w);
+        p.store_s(output, res);
+
+        let instructions = compile(&p)?;
+
+        let num_elements = 10;
+
+        let input_stream = (0..num_elements * 4).into_iter().collect::<Vec<_>>();
+        let expected_output_stream = (0..num_elements).map(|x| x * 4 * 3 + 1 + 3).into_iter().collect::<Vec<_>>();
+
+        test(&instructions, &[
+            InputStreamInfo {
+                data: &input_stream,
+                thread_stride: 4,
             },
         ], OutputStreamInfo {
             num_words: num_elements as _,

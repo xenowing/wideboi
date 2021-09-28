@@ -18,8 +18,8 @@ mod test {
     #[test]
     fn id() {
         let instructions = vec![
-            lod(R0, I0),
-            sto(O0, R0),
+            lod(R0, I0, 0),
+            sto(O0, R0, 0),
         ].into_iter().map(|i| i.encode()).collect::<Vec<_>>();
 
         let num_elements = 10;
@@ -41,9 +41,9 @@ mod test {
     #[test]
     fn x2() {
         let instructions = vec![
-            lod(R0, I0),
+            lod(R0, I0, 0),
             add(R0, R0, R0),
-            sto(O0, R0),
+            sto(O0, R0, 0),
         ].into_iter().map(|i| i.encode()).collect::<Vec<_>>();
 
         let num_elements = 10;

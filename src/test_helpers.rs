@@ -66,22 +66,20 @@ fn model<'a>(
                     let rhs = context.registers[rhs as usize];
                     context.registers[dst as usize] = lhs.wrapping_add(rhs);
                 }
-                Instruction::Load(dst, src) => {
+                Instruction::Load(dst, src, offset) => {
                     let input_stream_index = match src {
                         InputStream::I0 => 0,
                         InputStream::I1 => 1,
                     };
-                    context.registers[dst as usize] = input_stream_infos[input_stream_index].data[context.input_stream_offsets[input_stream_index] as usize];
-                    context.input_stream_offsets[input_stream_index] += 1;
+                    context.registers[dst as usize] = input_stream_infos[input_stream_index].data[context.input_stream_offsets[input_stream_index] as usize + offset as usize];
                 }
                 Instruction::Multiply(dst, lhs, rhs, shift) => {
                     let lhs = context.registers[lhs as usize] as i64;
                     let rhs = context.registers[rhs as usize] as i64;
                     context.registers[dst as usize] = (lhs.wrapping_mul(rhs) >> shift) as _;
                 }
-                Instruction::Store(_dst, src) => {
-                    output_stream[context.output_stream_offset as usize] = context.registers[src as usize];
-                    context.output_stream_offset += 1;
+                Instruction::Store(_dst, src, offset) => {
+                    output_stream[context.output_stream_offset as usize + offset as usize] = context.registers[src as usize];
                 }
             }
 

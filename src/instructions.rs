@@ -103,9 +103,9 @@ const_assert!(Register::VARIANT_COUNT.is_power_of_two());
 #[derive(Clone, Copy, Debug, Eq, PartialEq, VariantCount)]
 pub enum Instruction {
     Add(Register, Register, Register),
-    Load(Register, InputStream),
+    Load(Register, InputStream, u8),
     Multiply(Register, Register, Register, u8),
-    Store(OutputStream, Register),
+    Store(OutputStream, Register, u8),
 }
 
 impl Instruction {
@@ -122,11 +122,12 @@ impl Instruction {
                 .set(&e.lhs_reg, lhs as _)
                 .set(&e.rhs_reg, rhs as _)
             }
-            Instruction::Load(dst, src) => {
+            Instruction::Load(dst, src, offset) => {
                 0
                 .set(&e.opcode, opcode as _)
                 .set(&e.dst_reg, dst as _)
                 .set(&e.src_input_stream, src as _)
+                .set(&e.offset, offset as _)
             }
             Instruction::Multiply(dst, lhs, rhs, shift) => {
                 0
@@ -136,11 +137,12 @@ impl Instruction {
                 .set(&e.rhs_reg, rhs as _)
                 .set(&e.shift, shift as _)
             }
-            Instruction::Store(dst, src) => {
+            Instruction::Store(dst, src, offset) => {
                 0
                 .set(&e.opcode, opcode as _)
                 .set(&e.dst_output_stream, dst as _)
                 .set(&e.src_reg, src as _)
+                .set(&e.offset, offset as _)
             }
         }
     }
@@ -155,13 +157,14 @@ impl Instruction {
         let src_input_stream = InputStream::from_u32(i.value(&e.src_input_stream));
         let lhs_reg = Register::from_u32(i.value(&e.lhs_reg));
         let rhs_reg = Register::from_u32(i.value(&e.rhs_reg));
+        let offset = i.value(&e.offset) as u8 & OFFSET_FIELD_MASK;
         let shift = i.value(&e.shift) as u8 & SHIFT_FIELD_MASK;
 
         match opcode? {
             Opcode::Add => Some(Instruction::Add(dst_reg?, lhs_reg?, rhs_reg?)),
-            Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?)),
+            Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?, offset)),
             Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?, shift)),
-            Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?)),
+            Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?, offset)),
         }
     }
 
@@ -169,9 +172,9 @@ impl Instruction {
     pub fn mnemonic(&self) -> &'static str {
         match self {
             Instruction::Add(_, _, _) => "add",
-            Instruction::Load(_, _) => "lod",
+            Instruction::Load(_, _, _) => "lod",
             Instruction::Multiply(_, _, _, _) => "mul",
-            Instruction::Store(_, _) => "sto",
+            Instruction::Store(_, _, _) => "sto",
         }
     }
 
@@ -179,9 +182,9 @@ impl Instruction {
     fn opcode(&self) -> Opcode {
         match self {
             Instruction::Add(_, _, _) => Opcode::Add,
-            Instruction::Load(_, _) => Opcode::Load,
+            Instruction::Load(_, _, _) => Opcode::Load,
             Instruction::Multiply(_, _, _, _) => Opcode::Multiply,
-            Instruction::Store(_, _) => Opcode::Store,
+            Instruction::Store(_, _, _) => Opcode::Store,
         }
     }
 }
@@ -191,9 +194,9 @@ impl fmt::Display for Instruction {
         let mnemonic = self.mnemonic();
         match *self {
             Instruction::Add(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
-            Instruction::Load(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
+            Instruction::Load(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
             Instruction::Multiply(dst, lhs, rhs, shift) => write!(f, "{} {}, {}, {}, {}", mnemonic, dst, lhs, rhs, shift),
-            Instruction::Store(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
+            Instruction::Store(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
         }
     }
 }
@@ -202,16 +205,16 @@ pub fn add(dst: Register, lhs: Register, rhs: Register) -> Instruction {
     Instruction::Add(dst, lhs, rhs)
 }
 
-pub fn lod(dst: Register, src: InputStream) -> Instruction {
-    Instruction::Load(dst, src)
+pub fn lod(dst: Register, src: InputStream, offset: u8) -> Instruction {
+    Instruction::Load(dst, src, offset & OFFSET_FIELD_MASK)
 }
 
 pub fn mul(dst: Register, lhs: Register, rhs: Register, shift: u8) -> Instruction {
     Instruction::Multiply(dst, lhs, rhs, shift & SHIFT_FIELD_MASK)
 }
 
-pub fn sto(dst: OutputStream, src: Register) -> Instruction {
-    Instruction::Store(dst, src)
+pub fn sto(dst: OutputStream, src: Register, offset: u8) -> Instruction {
+    Instruction::Store(dst, src, offset & OFFSET_FIELD_MASK)
 }
 
 #[derive(Debug, Clone, Copy, VariantCount)]
@@ -237,8 +240,11 @@ impl Opcode {
 
 const_assert_eq!(Opcode::VARIANT_COUNT, Instruction::VARIANT_COUNT);
 
-pub const SHIFT_FIELD_NUM_BITS: usize = 6;
-pub const SHIFT_FIELD_MASK: u8 = (1 << SHIFT_FIELD_NUM_BITS) - 1;
+pub const OFFSET_FIELD_NUM_BITS: usize = 6;
+pub const OFFSET_FIELD_MASK: u8 = (1 << OFFSET_FIELD_NUM_BITS) - 1;
+
+pub const SHIFT_FIELD_NUM_BITS: usize = OFFSET_FIELD_NUM_BITS;
+pub const SHIFT_FIELD_MASK: u8 = OFFSET_FIELD_MASK;
 
 pub type EncodedInstruction = u32;
 
@@ -313,6 +319,7 @@ pub struct Encoding {
     pub src_input_stream: Field,
     pub lhs_reg: Field,
     pub rhs_reg: Field,
+    pub offset: Field,
     pub shift: Field,
 }
 
@@ -337,7 +344,9 @@ impl Encoding {
         let src_input_stream = src_reg.clone();
         let lhs_reg = src_reg.clone();
         let rhs_reg = f.field(reg_num_bits);
-        let shift = f.field(SHIFT_FIELD_NUM_BITS);
+        let offset = f.field(OFFSET_FIELD_NUM_BITS);
+        assert_eq!(SHIFT_FIELD_NUM_BITS, OFFSET_FIELD_NUM_BITS);
+        let shift = offset.clone();
 
         Encoding {
             opcode,
@@ -347,6 +356,7 @@ impl Encoding {
             src_input_stream,
             lhs_reg,
             rhs_reg,
+            offset,
             shift,
         }
     }
@@ -369,8 +379,8 @@ mod test {
 
     #[test]
     fn assemble_and_roundtrip_lod() {
-        let i = lod(R3, I0);
-        let e = Load(R3, I0);
+        let i = lod(R3, I0, 6);
+        let e = Load(R3, I0, 6);
         assemble_and_roundtrip(i, e);
     }
 
@@ -383,8 +393,8 @@ mod test {
 
     #[test]
     fn assemble_and_roundtrip_sto() {
-        let i = sto(O0, R6);
-        let e = Store(O0, R6);
+        let i = sto(O0, R6, 7);
+        let e = Store(O0, R6, 7);
         assemble_and_roundtrip(i, e);
     }
 
