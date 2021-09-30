@@ -209,11 +209,16 @@ mod ir {
     }
 }
 
+#[derive(Debug)]
 pub struct CompiledProgram {
     pub instructions: Box<[EncodedInstruction]>,
+    pub input_stream_thread_strides: Box<[u32]>,
+    pub output_stream_thread_stride: u32,
 }
 
 pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
+    let (input_stream_thread_strides, output_stream_thread_stride) = determine_thread_strides(p);
+
     let ddg = construct_ddg(p);
     println!("Directed dependency graph: {:#?}", ddg);
 
@@ -246,7 +251,21 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
 
     Ok(CompiledProgram {
         instructions: encoded_instructions.into(),
+        input_stream_thread_strides,
+        output_stream_thread_stride,
     })
+}
+
+fn determine_thread_strides(p: &program::Program) -> (Box<[u32]>, u32) {
+    let mut input_stream_thread_strides = Box::new([0; InputStream::VARIANT_COUNT]);
+
+    for (&input_stream, &n) in &p.num_input_stream_loads {
+        input_stream_thread_strides[input_stream as usize] = n;
+    }
+
+    let output_stream_thread_stride = p.num_output_stream_stores;
+
+    (input_stream_thread_strides, output_stream_thread_stride)
 }
 
 fn construct_ddg(p: &program::Program) -> ir::Ddg {
@@ -471,14 +490,8 @@ mod test {
         let expected_output_stream = input_stream.clone();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -501,14 +514,8 @@ mod test {
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -534,18 +541,9 @@ mod test {
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 3).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 1,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -571,18 +569,9 @@ mod test {
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * x * 2).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 1,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -608,18 +597,9 @@ mod test {
         let expected_output_stream = (0..num_elements).into_iter().flat_map(|x| [x * 3 + 0, x * 3 + 2, x * 3 + 4]).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 3,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 3,
-            },
-        ], OutputStreamInfo {
-            num_words: (num_elements * 3) as _,
-            thread_stride: 3,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -649,18 +629,9 @@ mod test {
             .collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 3,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 3,
-            },
-        ], OutputStreamInfo {
-            num_words: (num_elements * 3) as _,
-            thread_stride: 3,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -692,18 +663,9 @@ mod test {
         let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 3,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 3,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -749,18 +711,9 @@ mod test {
         let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream_x,
-                thread_stride: 3,
-            },
-            InputStreamInfo {
-                data: &input_stream_y,
-                thread_stride: 3,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream_x,
+            &input_stream_y,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -787,14 +740,8 @@ mod test {
         let expected_output_stream = (0..num_elements).map(|x| x * 4 * 3 + 1 + 3).into_iter().collect::<Vec<_>>();
 
         test(&program, &[
-            InputStreamInfo {
-                data: &input_stream,
-                thread_stride: 4,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream,
+        ], num_elements as _, &expected_output_stream);
 
         Ok(())
     }

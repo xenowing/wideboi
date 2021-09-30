@@ -1,27 +1,14 @@
 use crate::compiler::*;
 use crate::instructions::*;
 
-#[derive(Debug)]
-pub struct InputStreamInfo<'a> {
-    pub data: &'a [i32],
-    pub thread_stride: u32,
-}
-
-#[derive(Debug)]
-pub struct OutputStreamInfo {
-    pub num_words: u32,
-    pub thread_stride: u32,
-}
-
-fn model<'a>(
+fn model(
     program: &CompiledProgram,
-    input_stream_infos: &[InputStreamInfo<'a>],
-    output_stream_info: OutputStreamInfo,
+    input_stream_bindings: &[&[i32]],
     num_threads: u32,
 ) -> (Vec<i32>, u32) {
     let instructions = program.instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
     let num_instructions = instructions.len() as u32;
-    let mut output_stream = vec![0; output_stream_info.num_words as usize];
+    let mut output_stream = vec![0; (num_threads * program.output_stream_thread_stride) as usize];
 
     let num_contexts = 8;
 
@@ -48,12 +35,12 @@ fn model<'a>(
         }
     }
 
-    let mut contexts = vec![Context::new(vec![0; input_stream_infos.len()]); num_contexts as usize];
+    let mut contexts = vec![Context::new(vec![0; program.input_stream_thread_strides.len()]); num_contexts as usize];
 
     let mut next_context = 0;
     let mut next_thread = 0;
 
-    let mut input_stream_offsets = vec![0; input_stream_infos.len()];
+    let mut input_stream_offsets = vec![0; program.input_stream_thread_strides.len()];
     let mut output_stream_offset = 0;
 
     let mut num_cycles = 0;
@@ -72,7 +59,7 @@ fn model<'a>(
                         InputStream::I0 => 0,
                         InputStream::I1 => 1,
                     };
-                    context.registers[dst as usize] = input_stream_infos[input_stream_index].data[context.input_stream_offsets[input_stream_index] as usize + offset as usize];
+                    context.registers[dst as usize] = input_stream_bindings[input_stream_index][context.input_stream_offsets[input_stream_index] as usize + offset as usize];
                 }
                 Instruction::Multiply(dst, lhs, rhs, shift) => {
                     let lhs = context.registers[lhs as usize] as i64;
@@ -99,10 +86,10 @@ fn model<'a>(
             context.input_stream_offsets = input_stream_offsets.clone();
             context.output_stream_offset = output_stream_offset;
             next_thread += 1;
-            for (offset, input_stream_info) in input_stream_offsets.iter_mut().zip(input_stream_infos.iter()) {
-                *offset += input_stream_info.thread_stride;
+            for (offset, stride) in input_stream_offsets.iter_mut().zip(program.input_stream_thread_strides.iter()) {
+                *offset += stride;
             }
-            output_stream_offset += output_stream_info.thread_stride;
+            output_stream_offset += program.output_stream_thread_stride;
         }
 
         print!("cycle {:04}", num_cycles);
@@ -127,20 +114,22 @@ fn model<'a>(
     (output_stream, num_cycles)
 }
 
-pub fn test<'a>(
+pub fn test(
     program: &CompiledProgram,
-    input_stream_infos: &[InputStreamInfo<'a>],
-    output_stream_info: OutputStreamInfo,
+    input_stream_bindings: &[&[i32]],
     num_threads: u32,
     expected_output_stream: &[i32],
 ) {
-    println!("input stream infos: {:#?}", input_stream_infos);
-    println!("output stream info: {:#?}", output_stream_info);
+    println!("program: {:#?}", program);
     println!("expected output stream: {:?}", expected_output_stream);
+
+    for (&binding, &stride) in input_stream_bindings.iter().zip(program.input_stream_thread_strides.iter()) {
+        assert_eq!(binding.len() as u32, num_threads * stride);
+    }
 
     println!("testing model");
 
-    let (output_stream, num_cycles) = model(program, input_stream_infos, output_stream_info, num_threads);
+    let (output_stream, num_cycles) = model(program, input_stream_bindings, num_threads);
     println!(" - output stream: {:?}", output_stream);
     println!(" - num cycles: {}", num_cycles);
 

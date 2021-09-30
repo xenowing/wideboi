@@ -30,15 +30,11 @@ mod test {
 
         test(&CompiledProgram {
             instructions,
+            input_stream_thread_strides: Box::new([1]),
+            output_stream_thread_stride: 1,
         }, &[
-            InputStreamInfo {
-                data: &input_stream,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream,
+        ], num_elements as _, &expected_output_stream);
     }
 
     #[test]
@@ -55,15 +51,11 @@ mod test {
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
 
         test(&CompiledProgram {
-            instructions
+            instructions,
+            input_stream_thread_strides: Box::new([1]),
+            output_stream_thread_stride: 1,
         }, &[
-            InputStreamInfo {
-                data: &input_stream,
-                thread_stride: 1,
-            },
-        ], OutputStreamInfo {
-            num_words: num_elements as _,
-            thread_stride: 1,
-        }, num_elements as _, &expected_output_stream);
+            &input_stream,
+        ], num_elements as _, &expected_output_stream);
     }
 }
