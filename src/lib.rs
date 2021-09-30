@@ -256,7 +256,7 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        let res = p.dot(x, y, 0);
+        let res = p.dot_v3(x, y, 0);
         p.store_s(output, res);
 
         let program = compile(&p)?;
@@ -292,7 +292,7 @@ mod test {
         let output = O0;
         let x = p.load_v3(input_x);
         let y = p.load_v3(input_y);
-        let res = p.dot(x, y, q_shift);
+        let res = p.dot_v3(x, y, q_shift);
         p.store_s(output, res);
 
         let program = compile(&p)?;
@@ -388,6 +388,43 @@ mod test {
         test(&program, &[
             &input_stream_m4,
             &input_stream_v3,
+        ], num_elements, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn single_m4_v4_mul_id() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let q_shift = 8;
+
+        let input_m4 = I0;
+        let input_v4 = I1;
+        let output = O0;
+        let m4 = p.load_m4(input_m4);
+        let v4 = p.load_v4(input_v4);
+        let res = p.mul_m4_v4(m4, v4, q_shift);
+        p.store_v4(output, res);
+
+        let program = compile(&p)?;
+
+        let num_elements = 1;
+
+        let input_stream_m4 = [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let input_stream_v4 = vec![
+            1, 2, 3, 4
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let expected_output_stream = input_stream_v4.clone();
+
+        test(&program, &[
+            &input_stream_m4,
+            &input_stream_v4,
         ], num_elements, &expected_output_stream);
 
         Ok(())
