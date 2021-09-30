@@ -46,13 +46,13 @@ impl Program {
     }
 
     pub fn load_s(&mut self, src: InputStream) -> Scalar {
-        let name = self.alloc_var();
+        let t = self.alloc_var();
         // TODO: Limit loads based on offset field bits
         let loads = self.num_input_stream_loads.entry(src).or_insert(0);
         let offset = *loads;
         *loads += 1;
-        self.statements.push(Statement::Load(name, src, offset as _));
-        Scalar::VariableRef(name)
+        self.statements.push(Statement::Load(t, src, offset as _));
+        Scalar::VariableRef(t)
     }
 
     pub fn load_v3(&mut self, src: InputStream) -> V3 {
