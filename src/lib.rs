@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate static_assertions;
 
-mod bit_vector;
+mod bit_array;
 pub mod compiler;
 pub mod instructions;
 #[cfg(test)]

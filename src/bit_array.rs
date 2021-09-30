@@ -4,14 +4,14 @@ type StorageElement = u32;
 
 const STORAGE_ELEMENT_BITS: usize = size_of::<StorageElement>();
 
-pub struct BitVector {
+pub struct BitArray {
     len: usize,
     storage: Vec<StorageElement>,
 }
 
-impl BitVector {
-    pub fn new(len: usize) -> BitVector {
-        BitVector {
+impl BitArray {
+    pub fn new(len: usize) -> BitArray {
+        BitArray {
             len,
             storage: vec![0; (len + (STORAGE_ELEMENT_BITS - 1)) / STORAGE_ELEMENT_BITS],
         }
@@ -27,32 +27,32 @@ impl BitVector {
         self.storage[storage_index] |= mask;
     }
 
-    pub fn iter_set_indices(&self) -> BitVectorSetIndexIterator<'_> {
-        BitVectorSetIndexIterator::new(self)
+    pub fn iter_set_indices(&self) -> BitArraySetIndexIterator<'_> {
+        BitArraySetIndexIterator::new(self)
     }
 }
 
 #[derive(Clone)]
-pub struct BitVectorSetIndexIterator<'a> {
-    bit_vector: &'a BitVector,
+pub struct BitArraySetIndexIterator<'a> {
+    bit_array: &'a BitArray,
     index: usize,
 }
 
-impl<'a> BitVectorSetIndexIterator<'a> {
-    fn new(bit_vector: &'a BitVector) -> BitVectorSetIndexIterator<'a> {
-        BitVectorSetIndexIterator {
-            bit_vector,
+impl<'a> BitArraySetIndexIterator<'a> {
+    fn new(bit_array: &'a BitArray) -> BitArraySetIndexIterator<'a> {
+        BitArraySetIndexIterator {
+            bit_array,
             index: 0,
         }
     }
 }
 
-impl<'a> Iterator for BitVectorSetIndexIterator<'a> {
+impl<'a> Iterator for BitArraySetIndexIterator<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.index >= self.bit_vector.len {
+            if self.index >= self.bit_array.len {
                 return None;
             }
 
@@ -60,7 +60,7 @@ impl<'a> Iterator for BitVectorSetIndexIterator<'a> {
             self.index += 1;
 
             let (storage_index, mask) = storage_index_and_mask(index);
-            if (self.bit_vector.storage[storage_index] & mask) != 0 {
+            if (self.bit_array.storage[storage_index] & mask) != 0 {
                 return Some(index);
             }
         }

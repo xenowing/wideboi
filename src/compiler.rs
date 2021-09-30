@@ -1,4 +1,4 @@
-use crate::bit_vector::*;
+use crate::bit_array::*;
 use crate::instructions::*;
 
 use std::collections::{BTreeSet, HashMap};
@@ -347,7 +347,7 @@ fn try_schedule_node(n: NodeIndex, ddg: &ir::Ddg, program: &mut ir::Program) -> 
 }
 
 fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::VariableIndex)>, Vec<u32>) {
-    let mut is_live = BitVector::new(p.variable_registers.len());
+    let mut is_live = BitArray::new(p.variable_registers.len());
     let mut interference_edges = BTreeSet::new();
     let mut variable_degrees = vec![0; p.variable_registers.len()];
 
