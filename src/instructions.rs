@@ -127,7 +127,7 @@ impl Instruction {
                 .set(&e.opcode, opcode as _)
                 .set(&e.dst_reg, dst as _)
                 .set(&e.src_input_stream, src as _)
-                .set(&e.offset, offset as _)
+                .set(&e.stream_offset, offset as _)
             }
             Instruction::Multiply(dst, lhs, rhs, shift) => {
                 0
@@ -142,7 +142,7 @@ impl Instruction {
                 .set(&e.opcode, opcode as _)
                 .set(&e.dst_output_stream, dst as _)
                 .set(&e.src_reg, src as _)
-                .set(&e.offset, offset as _)
+                .set(&e.stream_offset, offset as _)
             }
         }
     }
@@ -157,14 +157,14 @@ impl Instruction {
         let src_input_stream = InputStream::from_u32(i.value(&e.src_input_stream));
         let lhs_reg = Register::from_u32(i.value(&e.lhs_reg));
         let rhs_reg = Register::from_u32(i.value(&e.rhs_reg));
-        let offset = i.value(&e.offset) as u8 & OFFSET_FIELD_MASK;
+        let stream_offset = i.value(&e.stream_offset) as u8 & STREAM_OFFSET_FIELD_MASK;
         let shift = i.value(&e.shift) as u8 & SHIFT_FIELD_MASK;
 
         match opcode? {
             Opcode::Add => Some(Instruction::Add(dst_reg?, lhs_reg?, rhs_reg?)),
-            Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?, offset)),
+            Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?, stream_offset)),
             Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?, shift)),
-            Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?, offset)),
+            Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?, stream_offset)),
         }
     }
 
@@ -206,7 +206,7 @@ pub fn add(dst: Register, lhs: Register, rhs: Register) -> Instruction {
 }
 
 pub fn lod(dst: Register, src: InputStream, offset: u8) -> Instruction {
-    Instruction::Load(dst, src, offset & OFFSET_FIELD_MASK)
+    Instruction::Load(dst, src, offset & STREAM_OFFSET_FIELD_MASK)
 }
 
 pub fn mul(dst: Register, lhs: Register, rhs: Register, shift: u8) -> Instruction {
@@ -214,7 +214,7 @@ pub fn mul(dst: Register, lhs: Register, rhs: Register, shift: u8) -> Instructio
 }
 
 pub fn sto(dst: OutputStream, src: Register, offset: u8) -> Instruction {
-    Instruction::Store(dst, src, offset & OFFSET_FIELD_MASK)
+    Instruction::Store(dst, src, offset & STREAM_OFFSET_FIELD_MASK)
 }
 
 #[derive(Debug, Clone, Copy, VariantCount)]
@@ -240,11 +240,11 @@ impl Opcode {
 
 const_assert_eq!(Opcode::VARIANT_COUNT, Instruction::VARIANT_COUNT);
 
-pub const OFFSET_FIELD_NUM_BITS: usize = 6;
-pub const OFFSET_FIELD_MASK: u8 = (1 << OFFSET_FIELD_NUM_BITS) - 1;
+pub const STREAM_OFFSET_FIELD_NUM_BITS: usize = 6;
+pub const STREAM_OFFSET_FIELD_MASK: u8 = (1 << STREAM_OFFSET_FIELD_NUM_BITS) - 1;
 
-pub const SHIFT_FIELD_NUM_BITS: usize = OFFSET_FIELD_NUM_BITS;
-pub const SHIFT_FIELD_MASK: u8 = OFFSET_FIELD_MASK;
+pub const SHIFT_FIELD_NUM_BITS: usize = STREAM_OFFSET_FIELD_NUM_BITS;
+pub const SHIFT_FIELD_MASK: u8 = STREAM_OFFSET_FIELD_MASK;
 
 pub type EncodedInstruction = u32;
 
@@ -319,7 +319,7 @@ pub struct Encoding {
     pub src_input_stream: Field,
     pub lhs_reg: Field,
     pub rhs_reg: Field,
-    pub offset: Field,
+    pub stream_offset: Field,
     pub shift: Field,
 }
 
@@ -344,9 +344,9 @@ impl Encoding {
         let src_input_stream = src_reg.clone();
         let lhs_reg = src_reg.clone();
         let rhs_reg = f.field(reg_num_bits);
-        let offset = f.field(OFFSET_FIELD_NUM_BITS);
-        assert_eq!(SHIFT_FIELD_NUM_BITS, OFFSET_FIELD_NUM_BITS);
-        let shift = offset.clone();
+        let stream_offset = f.field(STREAM_OFFSET_FIELD_NUM_BITS);
+        assert_eq!(SHIFT_FIELD_NUM_BITS, STREAM_OFFSET_FIELD_NUM_BITS);
+        let shift = stream_offset.clone();
 
         Encoding {
             opcode,
@@ -356,7 +356,7 @@ impl Encoding {
             src_input_stream,
             lhs_reg,
             rhs_reg,
-            offset,
+            stream_offset,
             shift,
         }
     }
