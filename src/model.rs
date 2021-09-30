@@ -64,7 +64,7 @@ pub fn model(
                 Instruction::Multiply(dst, lhs, rhs, shift) => {
                     let lhs = context.registers[lhs as usize] as i64;
                     let rhs = context.registers[rhs as usize] as i64;
-                    context.registers[dst as usize] = (lhs.wrapping_mul(rhs) >> shift) as _;
+                    context.registers[dst as usize] = ((lhs * rhs) >> shift) as _;
                 }
                 Instruction::Store(_dst, src, offset) => {
                     output_stream[context.output_stream_offset as usize + offset as usize] = context.registers[src as usize];
