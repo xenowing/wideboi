@@ -209,7 +209,11 @@ mod ir {
     }
 }
 
-pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileError> {
+pub struct CompiledProgram {
+    pub instructions: Box<[EncodedInstruction]>,
+}
+
+pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
     let ddg = construct_ddg(p);
     println!("Directed dependency graph: {:#?}", ddg);
 
@@ -240,7 +244,9 @@ pub fn compile(p: &program::Program) -> Result<Vec<EncodedInstruction>, CompileE
         println!("  0x{:08x}", encoded_instruction);
     }
 
-    Ok(encoded_instructions)
+    Ok(CompiledProgram {
+        instructions: encoded_instructions.into(),
+    })
 }
 
 fn construct_ddg(p: &program::Program) -> ir::Ddg {
@@ -457,14 +463,14 @@ mod test {
         let x = p.load_s(input);
         p.store_s(output, x);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
         let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
         let expected_output_stream = input_stream.clone();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream,
                 thread_stride: 1,
@@ -487,14 +493,14 @@ mod test {
         let res = p.add_s(x.clone(), x);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
         let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream,
                 thread_stride: 1,
@@ -519,7 +525,7 @@ mod test {
         let res = p.add_s(x, y);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -527,7 +533,7 @@ mod test {
         let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 3).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 1,
@@ -556,7 +562,7 @@ mod test {
         let res = p.mul_s(x, y, 0);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -564,7 +570,7 @@ mod test {
         let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().map(|x| x * x * 2).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 1,
@@ -593,7 +599,7 @@ mod test {
         let res = p.add_v3(x, y);
         p.store_v3(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -601,7 +607,7 @@ mod test {
         let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).into_iter().flat_map(|x| [x * 3 + 0, x * 3 + 2, x * 3 + 4]).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 3,
@@ -630,7 +636,7 @@ mod test {
         let res = p.mul_v3(x, y, 0);
         p.store_v3(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -642,7 +648,7 @@ mod test {
             .map(|(&x, &y)| x * y)
             .collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 3,
@@ -671,7 +677,7 @@ mod test {
         let res = p.dot(x, y, 0);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -685,7 +691,7 @@ mod test {
         let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
         let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 3,
@@ -716,7 +722,7 @@ mod test {
         let res = p.dot(x, y, q_shift);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
@@ -742,7 +748,7 @@ mod test {
         let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
         let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream_x,
                 thread_stride: 3,
@@ -773,14 +779,14 @@ mod test {
         let res = p.add_s(lhs, w);
         p.store_s(output, res);
 
-        let instructions = compile(&p)?;
+        let program = compile(&p)?;
 
         let num_elements = 10;
 
         let input_stream = (0..num_elements * 4).into_iter().collect::<Vec<_>>();
         let expected_output_stream = (0..num_elements).map(|x| x * 4 * 3 + 1 + 3).into_iter().collect::<Vec<_>>();
 
-        test(&instructions, &[
+        test(&program, &[
             InputStreamInfo {
                 data: &input_stream,
                 thread_stride: 4,

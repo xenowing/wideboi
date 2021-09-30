@@ -1,3 +1,4 @@
+use crate::compiler::*;
 use crate::instructions::*;
 
 #[derive(Debug)]
@@ -13,12 +14,12 @@ pub struct OutputStreamInfo {
 }
 
 fn model<'a>(
-    encoded_instructions: &[EncodedInstruction],
+    program: &CompiledProgram,
     input_stream_infos: &[InputStreamInfo<'a>],
     output_stream_info: OutputStreamInfo,
     num_threads: u32,
 ) -> (Vec<i32>, u32) {
-    let instructions = encoded_instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
+    let instructions = program.instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
     let num_instructions = instructions.len() as u32;
     let mut output_stream = vec![0; output_stream_info.num_words as usize];
 
@@ -127,7 +128,7 @@ fn model<'a>(
 }
 
 pub fn test<'a>(
-    encoded_instructions: &[EncodedInstruction],
+    program: &CompiledProgram,
     input_stream_infos: &[InputStreamInfo<'a>],
     output_stream_info: OutputStreamInfo,
     num_threads: u32,
@@ -139,7 +140,7 @@ pub fn test<'a>(
 
     println!("testing model");
 
-    let (output_stream, num_cycles) = model(&encoded_instructions, input_stream_infos, output_stream_info, num_threads);
+    let (output_stream, num_cycles) = model(program, input_stream_infos, output_stream_info, num_threads);
     println!(" - output stream: {:?}", output_stream);
     println!(" - num cycles: {}", num_cycles);
 
