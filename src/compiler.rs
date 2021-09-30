@@ -93,6 +93,11 @@ pub struct CompiledProgram {
 }
 
 pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
+    println!("Program statements:");
+    for s in &p.statements {
+        println!("  {:?}", s);
+    }
+
     let (input_stream_thread_strides, output_stream_thread_stride) = determine_thread_strides(p);
 
     let ddg = construct_ddg(p);

@@ -63,6 +63,16 @@ impl Program {
         }
     }
 
+    pub fn load_m3(&mut self, src: InputStream) -> M3 {
+        M3 {
+            columns: [
+                self.load_v3(src),
+                self.load_v3(src),
+                self.load_v3(src),
+            ],
+        }
+    }
+
     pub fn mul_s(&mut self, lhs: Scalar, rhs: Scalar, shift: u8) -> Scalar {
         let t = self.alloc_var();
         self.statements.push(Statement::Multiply(t, lhs, rhs, shift & SHIFT_FIELD_MASK));
@@ -74,6 +84,15 @@ impl Program {
             x: self.mul_s(lhs.x, rhs.x, shift),
             y: self.mul_s(lhs.y, rhs.y, shift),
             z: self.mul_s(lhs.z, rhs.z, shift),
+        }
+    }
+
+    pub fn mul_m3_v3(&mut self, lhs: M3, rhs: V3, shift: u8) -> V3 {
+        let rows = lhs.rows();
+        V3 {
+            x: self.dot(rows[0], rhs, shift),
+            y: self.dot(rows[1], rhs, shift),
+            z: self.dot(rows[2], rhs, shift),
         }
     }
 
@@ -91,11 +110,12 @@ impl Program {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub enum Scalar {
     VariableRef(VariableIndex),
 }
 
+#[derive(Debug)]
 pub enum Statement {
     Add(VariableIndex, Scalar, Scalar),
     Load(VariableIndex, InputStream, u8),
@@ -103,7 +123,7 @@ pub enum Statement {
     Store(OutputStream, Scalar, u8),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct V3 {
     pub x: Scalar,
     pub y: Scalar,
@@ -111,4 +131,25 @@ pub struct V3 {
 }
 
 #[derive(Clone, Copy)]
+pub struct M3 {
+    pub columns: [V3; 3],
+}
+
+impl M3 {
+    pub fn rows(self) -> [V3; 3] {
+        [
+            V3 { x: self.columns[0].x, y: self.columns[1].x, z: self.columns[2].x },
+            V3 { x: self.columns[0].y, y: self.columns[1].y, z: self.columns[2].y },
+            V3 { x: self.columns[0].z, y: self.columns[1].z, z: self.columns[2].z },
+        ]
+    }
+
+    pub fn transpose(self) -> M3 {
+        M3 {
+            columns: self.rows(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
 pub struct VariableIndex(pub u32);

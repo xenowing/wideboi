@@ -114,7 +114,7 @@ mod test {
         let input = I0;
         let output = O0;
         let x = p.load_s(input);
-        let res = p.add_s(x.clone(), x);
+        let res = p.add_s(x, x);
         p.store_s(output, res);
 
         let program = compile(&p)?;
@@ -353,6 +353,42 @@ mod test {
         test(&program, &[
             &input_stream,
         ], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn single_m3_v3_mul_id() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let q_shift = 8;
+
+        let input_m3 = I0;
+        let input_v3 = I1;
+        let output = O0;
+        let m3 = p.load_m3(input_m3);
+        let v3 = p.load_v3(input_v3);
+        let res = p.mul_m3_v3(m3, v3, q_shift);
+        p.store_v3(output, res);
+
+        let program = compile(&p)?;
+
+        let num_elements = 1;
+
+        let input_stream_m4 = [
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let input_stream_v3 = vec![
+            1, 2, 3,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let expected_output_stream = input_stream_v3.clone();
+
+        test(&program, &[
+            &input_stream_m4,
+            &input_stream_v3,
+        ], num_elements, &expected_output_stream);
 
         Ok(())
     }
