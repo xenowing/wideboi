@@ -1,10 +1,9 @@
 use crate::bit_array::*;
 use crate::instructions::*;
+use crate::program;
 
-use std::collections::{BTreeSet, HashMap};
-
-use self::ir::NodeIndex;
-use self::ir::VariableIndex;
+use std::collections::BTreeSet;
+use std::cell::Cell;
 
 #[derive(Debug)]
 pub enum CompileError {
@@ -13,199 +12,76 @@ pub enum CompileError {
     TooManyRegisters,
 }
 
-// TODO: Move?
-mod program {
-    use super::*;
-
-    pub struct Program {
-        pub statements: Vec<Statement>,
-        pub num_variables: u32,
-        pub num_input_stream_loads: HashMap<InputStream, u32>,
-        pub num_output_stream_stores: u32,
-    }
-
-    impl Program {
-        pub fn new() -> Program {
-            Program {
-                statements: Vec::new(),
-                num_variables: 0,
-                num_input_stream_loads: HashMap::new(),
-                num_output_stream_stores: 0,
-            }
-        }
-
-        pub fn add_s(&mut self, lhs: Scalar, rhs: Scalar) -> Scalar {
-            let t = self.alloc_var();
-            self.statements.push(Statement::Add(t, lhs, rhs));
-            Scalar::VariableRef(t)
-        }
-
-        pub fn add_v3(&mut self, lhs: V3, rhs: V3) -> V3 {
-            V3 {
-                x: self.add_s(lhs.x, rhs.x),
-                y: self.add_s(lhs.y, rhs.y),
-                z: self.add_s(lhs.z, rhs.z),
-            }
-        }
-
-        fn alloc_var(&mut self) -> VariableIndex {
-            let ret = VariableIndex(self.num_variables);
-            self.num_variables += 1;
-            ret
-        }
-
-        pub fn dot(&mut self, lhs: V3, rhs: V3, shift: u8) -> Scalar {
-            let temp = self.mul_v3(lhs, rhs, shift);
-            let lhs = self.add_s(temp.x, temp.y);
-            self.add_s(lhs, temp.z)
-        }
-
-        pub fn load_s(&mut self, src: InputStream) -> Scalar {
-            let name = self.alloc_var();
-            // TODO: Limit loads based on offset field bits
-            let loads = self.num_input_stream_loads.entry(src).or_insert(0);
-            let offset = *loads;
-            *loads += 1;
-            self.statements.push(Statement::Load(name, src, offset as _));
-            Scalar::VariableRef(name)
-        }
-
-        pub fn load_v3(&mut self, src: InputStream) -> V3 {
-            V3 {
-                x: self.load_s(src),
-                y: self.load_s(src),
-                z: self.load_s(src),
-            }
-        }
-
-        pub fn mul_s(&mut self, lhs: Scalar, rhs: Scalar, shift: u8) -> Scalar {
-            let t = self.alloc_var();
-            self.statements.push(Statement::Multiply(t, lhs, rhs, shift & SHIFT_FIELD_MASK));
-            Scalar::VariableRef(t)
-        }
-
-        pub fn mul_v3(&mut self, lhs: V3, rhs: V3, shift: u8) -> V3 {
-            V3 {
-                x: self.mul_s(lhs.x, rhs.x, shift),
-                y: self.mul_s(lhs.y, rhs.y, shift),
-                z: self.mul_s(lhs.z, rhs.z, shift),
-            }
-        }
-
-        pub fn store_s(&mut self, dst: OutputStream, src: Scalar) {
-            // TODO: Limit stores based on offset field bits
-            let offset = self.num_output_stream_stores;
-            self.num_output_stream_stores += 1;
-            self.statements.push(Statement::Store(dst, src, offset as _));
-        }
-
-        pub fn store_v3(&mut self, dst: OutputStream, src: V3) {
-            self.store_s(dst, src.x);
-            self.store_s(dst, src.y);
-            self.store_s(dst, src.z);
-        }
-    }
-
-    #[derive(Clone)]
-    pub enum Scalar {
-        VariableRef(VariableIndex),
-    }
-
-    pub enum Statement {
-        Add(VariableIndex, Scalar, Scalar),
-        Load(VariableIndex, InputStream, u8),
-        Multiply(VariableIndex, Scalar, Scalar, u8),
-        Store(OutputStream, Scalar, u8),
-    }
-
-    #[derive(Clone)]
-    pub struct V3 {
-        pub x: Scalar,
-        pub y: Scalar,
-        pub z: Scalar,
-    }
-
-    #[derive(Clone, Copy)]
-    pub struct VariableIndex(pub u32);
+#[derive(Debug)]
+struct Program {
+    statements: Vec<Statement>,
+    variable_registers: Vec<Option<Register>>,
 }
 
-// TODO: Move?
-mod ir {
-    use super::*;
-
-    use std::cell::Cell;
-
-    #[derive(Debug)]
-    pub struct Program {
-        pub statements: Vec<Statement>,
-        pub variable_registers: Vec<Option<Register>>,
-    }
-
-    impl Program {
-        pub fn new(num_variables: u32) -> Program {
-            Program {
-                statements: Vec::new(),
-                variable_registers: vec![None; num_variables as usize],
-            }
-        }
-
-        pub fn reg(&self, variable_index: VariableIndex) -> Option<Register> {
-            self.variable_registers[variable_index.0 as usize]
+impl Program {
+    fn new(num_variables: u32) -> Program {
+        Program {
+            statements: Vec::new(),
+            variable_registers: vec![None; num_variables as usize],
         }
     }
 
-    #[derive(Debug)]
-    pub struct Ddg {
-        pub nodes: Vec<Node>,
-        pub variable_def_nodes: Vec<Option<NodeIndex>>,
-        pub output_stream_nodes: Vec<NodeIndex>,
+    fn reg(&self, variable_index: VariableIndex) -> Option<Register> {
+        self.variable_registers[variable_index.0 as usize]
     }
+}
 
-    impl Ddg {
-        pub fn new(num_variables: u32) -> Ddg {
-            Ddg {
-                nodes: Vec::new(),
-                variable_def_nodes: vec![None; num_variables as usize],
-                output_stream_nodes: Vec::new(),
-            }
+#[derive(Debug)]
+struct Ddg {
+    nodes: Vec<Node>,
+    variable_def_nodes: Vec<Option<NodeIndex>>,
+    output_stream_nodes: Vec<NodeIndex>,
+}
+
+impl Ddg {
+    fn new(num_variables: u32) -> Ddg {
+        Ddg {
+            nodes: Vec::new(),
+            variable_def_nodes: vec![None; num_variables as usize],
+            output_stream_nodes: Vec::new(),
         }
     }
+}
 
-    #[derive(Debug)]
-    pub struct Node {
-        pub statement: Statement,
-        pub predecessors: Vec<NodeIndex>,
-        pub is_scheduled: Cell<bool>,
-    }
+#[derive(Debug)]
+struct Node {
+    statement: Statement,
+    predecessors: Vec<NodeIndex>,
+    is_scheduled: Cell<bool>,
+}
 
-    impl Node {
-        pub fn new(statement: Statement, predecessors: Vec<NodeIndex>) -> Node {
-            Node {
-                statement,
-                predecessors,
-                is_scheduled: Cell::new(false),
-            }
+impl Node {
+    fn new(statement: Statement, predecessors: Vec<NodeIndex>) -> Node {
+        Node {
+            statement,
+            predecessors,
+            is_scheduled: Cell::new(false),
         }
     }
+}
 
-    #[derive(Debug, Clone, Copy)]
-    pub struct NodeIndex(pub u32);
+#[derive(Debug, Clone, Copy)]
+struct NodeIndex(u32);
 
-    #[derive(Debug, Clone, Copy)]
-    pub enum Statement {
-        Add(VariableIndex, VariableIndex, VariableIndex),
-        Load(VariableIndex, InputStream, u8),
-        Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
-        Store(OutputStream, VariableIndex, u8),
-    }
+#[derive(Debug, Clone, Copy)]
+enum Statement {
+    Add(VariableIndex, VariableIndex, VariableIndex),
+    Load(VariableIndex, InputStream, u8),
+    Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
+    Store(OutputStream, VariableIndex, u8),
+}
 
-    #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-    pub struct VariableIndex(pub u32);
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct VariableIndex(u32);
 
-    impl From<program::VariableIndex> for VariableIndex {
-        fn from(i: program::VariableIndex) -> Self {
-            Self(i.0)
-        }
+impl From<program::VariableIndex> for VariableIndex {
+    fn from(i: program::VariableIndex) -> Self {
+        Self(i.0)
     }
 }
 
@@ -222,7 +98,7 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
     let ddg = construct_ddg(p);
     println!("Directed dependency graph: {:#?}", ddg);
 
-    let mut program = ir::Program::new(p.num_variables);
+    let mut program = Program::new(p.num_variables);
 
     schedule(&ddg, &mut program);
     println!("Schedule:");
@@ -268,8 +144,8 @@ fn determine_thread_strides(p: &program::Program) -> (Box<[u32]>, u32) {
     (input_stream_thread_strides, output_stream_thread_stride)
 }
 
-fn construct_ddg(p: &program::Program) -> ir::Ddg {
-    let mut ddg = ir::Ddg::new(p.num_variables);
+fn construct_ddg(p: &program::Program) -> Ddg {
+    let mut ddg = Ddg::new(p.num_variables);
 
     for s in &p.statements {
         visit_statement(s, &mut ddg);
@@ -278,16 +154,16 @@ fn construct_ddg(p: &program::Program) -> ir::Ddg {
     ddg
 }
 
-fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
-    let index = ir::NodeIndex(ddg.nodes.len() as _);
+fn visit_statement(s: &program::Statement, ddg: &mut Ddg) {
+    let index = NodeIndex(ddg.nodes.len() as _);
 
     let (n, v) = match *s {
         program::Statement::Add(dst, ref lhs, ref rhs) => {
             let (lhs, lhs_p) = visit_scalar(lhs, ddg);
             let (rhs, rhs_p) = visit_scalar(rhs, ddg);
             (
-                ir::Node::new(
-                    ir::Statement::Add(dst.into(), lhs, rhs),
+                Node::new(
+                    Statement::Add(dst.into(), lhs, rhs),
                     vec![lhs_p, rhs_p],
                 ),
                 Some(dst),
@@ -295,8 +171,8 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
         }
         program::Statement::Load(dst, src, offset) => {
             (
-                ir::Node::new(
-                    ir::Statement::Load(dst.into(), src, offset),
+                Node::new(
+                    Statement::Load(dst.into(), src, offset),
                     Vec::new(),
                 ),
                 Some(dst),
@@ -306,8 +182,8 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
             let (lhs, lhs_p) = visit_scalar(lhs, ddg);
             let (rhs, rhs_p) = visit_scalar(rhs, ddg);
             (
-                ir::Node::new(
-                    ir::Statement::Multiply(dst.into(), lhs, rhs, shift),
+                Node::new(
+                    Statement::Multiply(dst.into(), lhs, rhs, shift),
                     vec![lhs_p, rhs_p],
                 ),
                 Some(dst)
@@ -316,8 +192,8 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
         program::Statement::Store(dst, ref src, offset) => {
             let (src, src_p) = visit_scalar(src, ddg);
             let ret = (
-                ir::Node::new(
-                    ir::Statement::Store(dst, src, offset),
+                Node::new(
+                    Statement::Store(dst, src, offset),
                     vec![src_p],
                 ),
                 None,
@@ -333,7 +209,7 @@ fn visit_statement(s: &program::Statement, ddg: &mut ir::Ddg) {
     }
 }
 
-fn visit_scalar(s: &program::Scalar, ddg: &ir::Ddg) -> (ir::VariableIndex, NodeIndex) {
+fn visit_scalar(s: &program::Scalar, ddg: &Ddg) -> (VariableIndex, NodeIndex) {
     match *s {
         program::Scalar::VariableRef(src) => {
             (src.into(), ddg.variable_def_nodes[src.0 as usize].unwrap())
@@ -341,11 +217,11 @@ fn visit_scalar(s: &program::Scalar, ddg: &ir::Ddg) -> (ir::VariableIndex, NodeI
     }
 }
 
-fn schedule(ddg: &ir::Ddg, program: &mut ir::Program) {
+fn schedule(ddg: &Ddg, program: &mut Program) {
     assert!(try_schedule_predecessors(&ddg.output_stream_nodes, ddg, program));
 }
 
-fn try_schedule_predecessors(predecessors: &[NodeIndex], ddg: &ir::Ddg, program: &mut ir::Program) -> bool {
+fn try_schedule_predecessors(predecessors: &[NodeIndex], ddg: &Ddg, program: &mut Program) -> bool {
     loop {
         let mut has_progressed = false;
         for &p in predecessors {
@@ -359,7 +235,7 @@ fn try_schedule_predecessors(predecessors: &[NodeIndex], ddg: &ir::Ddg, program:
     }
 }
 
-fn try_schedule_node(n: NodeIndex, ddg: &ir::Ddg, program: &mut ir::Program) -> Option<bool> {
+fn try_schedule_node(n: NodeIndex, ddg: &Ddg, program: &mut Program) -> Option<bool> {
     if ddg.nodes[n.0 as usize].is_scheduled.get() {
         return Some(false);
     }
@@ -371,17 +247,17 @@ fn try_schedule_node(n: NodeIndex, ddg: &ir::Ddg, program: &mut ir::Program) -> 
     Some(true)
 }
 
-fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::VariableIndex)>, Vec<u32>) {
+fn analyze_liveness(p: &Program) -> (BTreeSet<(VariableIndex, VariableIndex)>, Vec<u32>) {
     let mut is_live = BitArray::new(p.variable_registers.len());
     let mut interference_edges = BTreeSet::new();
     let mut variable_degrees = vec![0; p.variable_registers.len()];
 
     for s in p.statements.iter().rev() {
         let (uses, def) = match *s {
-            ir::Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
-            ir::Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
-            ir::Statement::Load(dst, _, _) => (Vec::new(), Some(dst)),
-            ir::Statement::Store(_, src, _) => (vec![src], None),
+            Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
+            Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
+            Statement::Load(dst, _, _) => (Vec::new(), Some(dst)),
+            Statement::Store(_, src, _) => (vec![src], None),
         };
         if let Some(d) = def {
             is_live.clear(d.0 as _);
@@ -405,8 +281,8 @@ fn analyze_liveness(p: &ir::Program) -> (BTreeSet<(ir::VariableIndex, ir::Variab
 }
 
 fn allocate_registers(
-    program: &mut ir::Program,
-    interference_edges: BTreeSet<(ir::VariableIndex, ir::VariableIndex)>,
+    program: &mut Program,
+    interference_edges: BTreeSet<(VariableIndex, VariableIndex)>,
     variable_degrees: Vec<u32>,
 ) -> Result<(), CompileError> {
     let mut sorted_variables =
@@ -436,25 +312,25 @@ fn allocate_registers(
     Ok(())
 }
 
-fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
+fn generate_instructions(program: &Program) -> Vec<Instruction> {
     program.statements.iter().map(|s| match *s {
-        ir::Statement::Add(dst, lhs, rhs) => {
+        Statement::Add(dst, lhs, rhs) => {
             let dst = program.reg(dst).unwrap();
             let lhs = program.reg(lhs).unwrap();
             let rhs = program.reg(rhs).unwrap();
             add(dst, lhs, rhs)
         }
-        ir::Statement::Multiply(dst, lhs, rhs, shift) => {
+        Statement::Multiply(dst, lhs, rhs, shift) => {
             let dst = program.reg(dst).unwrap();
             let lhs = program.reg(lhs).unwrap();
             let rhs = program.reg(rhs).unwrap();
             mul(dst, lhs, rhs, shift)
         }
-        ir::Statement::Load(dst, src, offset) => {
+        Statement::Load(dst, src, offset) => {
             let dst = program.reg(dst).unwrap();
             lod(dst, src, offset)
         }
-        ir::Statement::Store(dst, src, offset) => {
+        Statement::Store(dst, src, offset) => {
             let src = program.reg(src).unwrap();
             sto(dst, src, offset)
         }
@@ -463,286 +339,4 @@ fn generate_instructions(program: &ir::Program) -> Vec<Instruction> {
 
 fn encode_instructions(instructions: &[Instruction]) -> Vec<EncodedInstruction> {
     instructions.iter().map(|&i| i.encode()).collect()
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::compiler::program::Program;
-    use crate::instructions::InputStream::*;
-    use crate::instructions::OutputStream::*;
-    use crate::test_helpers::*;
-
-    #[test]
-    fn id() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input = I0;
-        let output = O0;
-        let x = p.load_s(input);
-        p.store_s(output, x);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
-        let expected_output_stream = input_stream.clone();
-
-        test(&program, &[
-            &input_stream,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn x2() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input = I0;
-        let output = O0;
-        let x = p.load_s(input);
-        let res = p.add_s(x.clone(), x);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream = (0..num_elements).into_iter().collect::<Vec<_>>();
-        let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn scalar_sums() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_s(input_x);
-        let y = p.load_s(input_y);
-        let res = p.add_s(x, y);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x = (0..num_elements).into_iter().collect::<Vec<_>>();
-        let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
-        let expected_output_stream = (0..num_elements).into_iter().map(|x| x * 3).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn scalar_muls_integer() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_s(input_x);
-        let y = p.load_s(input_y);
-        let res = p.mul_s(x, y, 0);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x = (0..num_elements).into_iter().collect::<Vec<_>>();
-        let input_stream_y = (0..num_elements).into_iter().map(|x| x * 2).collect::<Vec<_>>();
-        let expected_output_stream = (0..num_elements).into_iter().map(|x| x * x * 2).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn vector_sums() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_v3(input_x);
-        let y = p.load_v3(input_y);
-        let res = p.add_v3(x, y);
-        p.store_v3(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x = (0..num_elements).into_iter().flat_map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
-        let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
-        let expected_output_stream = (0..num_elements).into_iter().flat_map(|x| [x * 3 + 0, x * 3 + 2, x * 3 + 4]).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn vector_muls_integer() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_v3(input_x);
-        let y = p.load_v3(input_y);
-        let res = p.mul_v3(x, y, 0);
-        p.store_v3(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x = (0..num_elements).into_iter().flat_map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
-        let input_stream_y = (0..num_elements).into_iter().flat_map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
-        let expected_output_stream =
-            input_stream_x.iter()
-            .zip(input_stream_y.iter())
-            .map(|(&x, &y)| x * y)
-            .collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn vector_dots_integer() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_v3(input_x);
-        let y = p.load_v3(input_y);
-        let res = p.dot(x, y, 0);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x_v3 = (0..num_elements).into_iter().map(|x| [x * 1 + 0, x * 1 + 1, x * 1 + 2]).collect::<Vec<_>>();
-        let input_stream_y_v3 = (0..num_elements).into_iter().map(|x| [x * 2 + 0, x * 2 + 1, x * 2 + 2]).collect::<Vec<_>>();
-        let expected_output_stream =
-            input_stream_x_v3.iter()
-            .zip(input_stream_y_v3.iter())
-            .map(|(x, y)| (x[0] * y[0]) + (x[1] * y[1]) + (x[2] * y[2]))
-            .collect::<Vec<_>>();
-        let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
-        let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn vector_dots_q() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let q_shift = 16;
-
-        let input_x = I0;
-        let input_y = I1;
-        let output = O0;
-        let x = p.load_v3(input_x);
-        let y = p.load_v3(input_y);
-        let res = p.dot(x, y, q_shift);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream_x_v3 = (0..num_elements).into_iter().map(|x| [
-            (x * 1 + 0) << q_shift,
-            (x * 1 + 1) << q_shift,
-            (x * 1 + 2) << q_shift,
-        ]).collect::<Vec<_>>();
-        let input_stream_y_v3 = (0..num_elements).into_iter().map(|x| [
-            (x * 2 + 0) << q_shift,
-            (x * 2 + 1) << q_shift,
-            (x * 2 + 2) << q_shift,
-        ]).collect::<Vec<_>>();
-        let expected_output_stream =
-            input_stream_x_v3.iter()
-            .zip(input_stream_y_v3.iter())
-            .map(|(x, y)|
-                (((x[0] as i64 * y[0] as i64) >> q_shift) as i32) +
-                (((x[1] as i64 * y[1] as i64) >> q_shift) as i32) +
-                (((x[2] as i64 * y[2] as i64) >> q_shift) as i32)
-            )
-            .collect::<Vec<_>>();
-        let input_stream_x = input_stream_x_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
-        let input_stream_y = input_stream_y_v3.into_iter().flat_map(|x| x).collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream_x,
-            &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
-
-    #[test]
-    fn dead_scalar_loads() -> Result<(), CompileError> {
-        let mut p = Program::new();
-
-        let input = I0;
-        let output = O0;
-        let x = p.load_s(input);
-        let y = p.load_s(input);
-        let _z = p.load_s(input);
-        let w = p.load_s(input);
-        let lhs = p.add_s(x, y);
-        let res = p.add_s(lhs, w);
-        p.store_s(output, res);
-
-        let program = compile(&p)?;
-
-        let num_elements = 10;
-
-        let input_stream = (0..num_elements * 4).into_iter().collect::<Vec<_>>();
-        let expected_output_stream = (0..num_elements).map(|x| x * 4 * 3 + 1 + 3).into_iter().collect::<Vec<_>>();
-
-        test(&program, &[
-            &input_stream,
-        ], num_elements as _, &expected_output_stream);
-
-        Ok(())
-    }
 }

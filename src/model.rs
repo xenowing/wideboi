@@ -1,7 +1,7 @@
 use crate::compiler::*;
 use crate::instructions::*;
 
-fn model(
+pub fn model(
     program: &CompiledProgram,
     input_stream_bindings: &[&[i32]],
     num_threads: u32,
@@ -112,28 +112,4 @@ fn model(
     }
 
     (output_stream, num_cycles)
-}
-
-pub fn test(
-    program: &CompiledProgram,
-    input_stream_bindings: &[&[i32]],
-    num_threads: u32,
-    expected_output_stream: &[i32],
-) {
-    println!("program: {:#?}", program);
-    println!("expected output stream: {:?}", expected_output_stream);
-
-    for (&binding, &stride) in input_stream_bindings.iter().zip(program.input_stream_thread_strides.iter()) {
-        assert_eq!(binding.len() as u32, num_threads * stride);
-    }
-
-    println!("testing model");
-
-    let (output_stream, num_cycles) = model(program, input_stream_bindings, num_threads);
-    println!(" - output stream: {:?}", output_stream);
-    println!(" - num cycles: {}", num_cycles);
-
-    assert_eq!(output_stream, expected_output_stream);
-
-    println!("success!");
 }
