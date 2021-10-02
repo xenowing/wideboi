@@ -106,6 +106,7 @@ pub enum Instruction {
     Load(Register, InputStream, u8),
     Multiply(Register, Register, Register, u8),
     Store(OutputStream, Register, u8),
+    Uniform(Register, u8),
 }
 
 impl Instruction {
@@ -144,6 +145,12 @@ impl Instruction {
                 .set(&e.src_reg, src as _)
                 .set(&e.stream_offset, offset as _)
             }
+            Instruction::Uniform(dst, offset) => {
+                0
+                .set(&e.opcode, opcode as _)
+                .set(&e.dst_reg, dst as _)
+                .set(&e.uniform_offset, offset as _)
+            }
         }
     }
 
@@ -158,6 +165,7 @@ impl Instruction {
         let lhs_reg = Register::from_u32(i.value(&e.lhs_reg));
         let rhs_reg = Register::from_u32(i.value(&e.rhs_reg));
         let stream_offset = i.value(&e.stream_offset) as u8 & STREAM_OFFSET_FIELD_MASK;
+        let uniform_offset = i.value(&e.uniform_offset) as u8 & UNIFORM_OFFSET_FIELD_MASK;
         let shift = i.value(&e.shift) as u8 & SHIFT_FIELD_MASK;
 
         match opcode? {
@@ -165,6 +173,7 @@ impl Instruction {
             Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?, stream_offset)),
             Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?, shift)),
             Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?, stream_offset)),
+            Opcode::Uniform => Some(Instruction::Uniform(dst_reg?, uniform_offset)),
         }
     }
 
@@ -175,6 +184,7 @@ impl Instruction {
             Instruction::Load(_, _, _) => "lod",
             Instruction::Multiply(_, _, _, _) => "mul",
             Instruction::Store(_, _, _) => "sto",
+            Instruction::Uniform(_, _) => "uni",
         }
     }
 
@@ -185,6 +195,7 @@ impl Instruction {
             Instruction::Load(_, _, _) => Opcode::Load,
             Instruction::Multiply(_, _, _, _) => Opcode::Multiply,
             Instruction::Store(_, _, _) => Opcode::Store,
+            Instruction::Uniform(_, _) => Opcode::Uniform,
         }
     }
 }
@@ -197,6 +208,7 @@ impl fmt::Display for Instruction {
             Instruction::Load(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
             Instruction::Multiply(dst, lhs, rhs, shift) => write!(f, "{} {}, {}, {}, {}", mnemonic, dst, lhs, rhs, shift),
             Instruction::Store(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
+            Instruction::Uniform(dst, offset) => write!(f, "{} {}, {}", mnemonic, dst, offset),
         }
     }
 }
@@ -217,12 +229,17 @@ pub fn sto(dst: OutputStream, src: Register, offset: u8) -> Instruction {
     Instruction::Store(dst, src, offset & STREAM_OFFSET_FIELD_MASK)
 }
 
+pub fn uni(dst: Register, offset: u8) -> Instruction {
+    Instruction::Uniform(dst, offset & UNIFORM_OFFSET_FIELD_MASK)
+}
+
 #[derive(Debug, Clone, Copy, VariantCount)]
 enum Opcode {
     Add,
     Load,
     Multiply,
     Store,
+    Uniform,
 }
 
 impl Opcode {
@@ -233,6 +250,7 @@ impl Opcode {
             1 => Some(Opcode::Load),
             2 => Some(Opcode::Multiply),
             3 => Some(Opcode::Store),
+            4 => Some(Opcode::Uniform),
             _ => None
         }
     }
@@ -242,6 +260,9 @@ const_assert_eq!(Opcode::VARIANT_COUNT, Instruction::VARIANT_COUNT);
 
 pub const STREAM_OFFSET_FIELD_NUM_BITS: usize = 6;
 pub const STREAM_OFFSET_FIELD_MASK: u8 = (1 << STREAM_OFFSET_FIELD_NUM_BITS) - 1;
+
+pub const UNIFORM_OFFSET_FIELD_NUM_BITS: usize = STREAM_OFFSET_FIELD_NUM_BITS;
+pub const UNIFORM_OFFSET_FIELD_MASK: u8 = STREAM_OFFSET_FIELD_MASK;
 
 pub const SHIFT_FIELD_NUM_BITS: usize = STREAM_OFFSET_FIELD_NUM_BITS;
 pub const SHIFT_FIELD_MASK: u8 = STREAM_OFFSET_FIELD_MASK;
@@ -320,6 +341,7 @@ pub struct Encoding {
     pub lhs_reg: Field,
     pub rhs_reg: Field,
     pub stream_offset: Field,
+    pub uniform_offset: Field,
     pub shift: Field,
 }
 
@@ -345,6 +367,8 @@ impl Encoding {
         let lhs_reg = src_reg.clone();
         let rhs_reg = f.field(reg_num_bits);
         let stream_offset = f.field(STREAM_OFFSET_FIELD_NUM_BITS);
+        assert_eq!(UNIFORM_OFFSET_FIELD_NUM_BITS, STREAM_OFFSET_FIELD_NUM_BITS);
+        let uniform_offset = stream_offset.clone();
         assert_eq!(SHIFT_FIELD_NUM_BITS, STREAM_OFFSET_FIELD_NUM_BITS);
         let shift = stream_offset.clone();
 
@@ -357,6 +381,7 @@ impl Encoding {
             lhs_reg,
             rhs_reg,
             stream_offset,
+            uniform_offset,
             shift,
         }
     }
@@ -395,6 +420,13 @@ mod test {
     fn assemble_and_roundtrip_sto() {
         let i = sto(O0, R6, 7);
         let e = Store(O0, R6, 7);
+        assemble_and_roundtrip(i, e);
+    }
+
+    #[test]
+    fn assemble_and_roundtrip_uni() {
+        let i = uni(R3, 28);
+        let e = Uniform(R3, 28);
         assemble_and_roundtrip(i, e);
     }
 

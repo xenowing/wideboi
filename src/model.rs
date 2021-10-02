@@ -4,6 +4,7 @@ use crate::instructions::*;
 pub fn model(
     program: &CompiledProgram,
     input_stream_bindings: &[&[i32]],
+    uniform_data: &[i32],
     num_threads: u32,
 ) -> (Vec<i32>, u32) {
     let instructions = program.instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
@@ -68,6 +69,9 @@ pub fn model(
                 }
                 Instruction::Store(_dst, src, offset) => {
                     output_stream[context.output_stream_offset as usize + offset as usize] = context.registers[src as usize];
+                }
+                Instruction::Uniform(dst, offset) => {
+                    context.registers[dst as usize] = uniform_data[offset as usize];
                 }
             }
 

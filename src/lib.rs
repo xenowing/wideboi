@@ -20,6 +20,7 @@ mod test {
     pub fn test(
         program: &CompiledProgram,
         input_stream_bindings: &[&[i32]],
+        uniform_data: &[i32],
         num_threads: u32,
         expected_output_stream: &[i32],
     ) {
@@ -30,9 +31,11 @@ mod test {
             assert_eq!(binding.len() as u32, num_threads * stride);
         }
 
+        // TODO: Assert uniform data len
+
         println!("testing model");
 
-        let (output_stream, num_cycles) = model(program, input_stream_bindings, num_threads);
+        let (output_stream, num_cycles) = model(program, input_stream_bindings, uniform_data, num_threads);
         println!(" - output stream: {:?}", output_stream);
         println!(" - num cycles: {}", num_cycles);
 
@@ -59,7 +62,7 @@ mod test {
             output_stream_thread_stride: 1,
         }, &[
             &input_stream,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
     }
 
     #[test]
@@ -81,7 +84,26 @@ mod test {
             output_stream_thread_stride: 1,
         }, &[
             &input_stream,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
+    }
+
+    #[test]
+    fn uni_asm() {
+        let instructions = vec![
+            uni(R0, 0),
+            sto(O0, R0, 0),
+        ].into_iter().map(|i| i.encode()).collect();
+
+        let num_elements = 10;
+
+        let uniform_data = vec![1337];
+        let expected_output_stream = vec![1337; num_elements as usize];
+
+        test(&CompiledProgram {
+            instructions,
+            input_stream_thread_strides: Box::new([]),
+            output_stream_thread_stride: 1,
+        }, &[], &uniform_data, num_elements as _, &expected_output_stream);
     }
 
     #[test]
@@ -102,7 +124,7 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -126,7 +148,7 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -154,7 +176,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -182,7 +204,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -210,7 +232,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -242,7 +264,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -276,7 +298,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -324,7 +346,7 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -352,7 +374,7 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ], num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -388,7 +410,7 @@ mod test {
         test(&program, &[
             &input_stream_m4,
             &input_stream_v3,
-        ], num_elements, &expected_output_stream);
+        ], &[], num_elements, &expected_output_stream);
 
         Ok(())
     }
@@ -425,7 +447,7 @@ mod test {
         test(&program, &[
             &input_stream_m4,
             &input_stream_v4,
-        ], num_elements, &expected_output_stream);
+        ], &[], num_elements, &expected_output_stream);
 
         Ok(())
     }
