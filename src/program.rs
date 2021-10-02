@@ -48,8 +48,8 @@ impl Program {
     pub fn dot_v4(&mut self, lhs: V4, rhs: V4, shift: u8) -> Scalar {
         let temp = self.mul_v4(lhs, rhs, shift);
         let lhs = self.add_s(temp.x, temp.y);
-        let rhs = self.add_s(temp.z, temp.w);
-        self.add_s(lhs, rhs)
+        let lhs = self.add_s(lhs, temp.z);
+        self.add_s(lhs, temp.w)
     }
 
     pub fn load_s(&mut self, src: InputStream) -> Scalar {
