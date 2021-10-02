@@ -31,7 +31,7 @@ mod test {
             assert_eq!(binding.len() as u32, num_threads * stride);
         }
 
-        // TODO: Assert uniform data len
+        assert_eq!(uniform_data.len() as u32, program.num_uniforms);
 
         println!("testing model");
 
@@ -59,6 +59,7 @@ mod test {
         test(&CompiledProgram {
             instructions,
             input_stream_thread_strides: Box::new([1]),
+            num_uniforms: 0,
             output_stream_thread_stride: 1,
         }, &[
             &input_stream,
@@ -81,6 +82,7 @@ mod test {
         test(&CompiledProgram {
             instructions,
             input_stream_thread_strides: Box::new([1]),
+            num_uniforms: 0,
             output_stream_thread_stride: 1,
         }, &[
             &input_stream,
@@ -102,6 +104,7 @@ mod test {
         test(&CompiledProgram {
             instructions,
             input_stream_thread_strides: Box::new([]),
+            num_uniforms: 1,
             output_stream_thread_stride: 1,
         }, &[], &uniform_data, num_elements as _, &expected_output_stream);
     }
@@ -149,6 +152,27 @@ mod test {
         test(&program, &[
             &input_stream,
         ], &[], num_elements as _, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn uni_compiled() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let uni = p.alloc_uni_s();
+        let output = O0;
+        let x = p.uni_s(uni);
+        p.store_s(output, x);
+
+        let program = compile(&p)?;
+
+        let num_elements = 10;
+
+        let uniform_data = vec![1337];
+        let expected_output_stream = vec![1337; num_elements as usize];
+
+        test(&program, &[], &uniform_data, num_elements as _, &expected_output_stream);
 
         Ok(())
     }
@@ -440,7 +464,7 @@ mod test {
             0, 0, 0, 1,
         ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
         let input_stream_v4 = vec![
-            1, 2, 3, 4
+            1, 2, 3, 4,
         ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
         let expected_output_stream = input_stream_v4.clone();
 
@@ -448,6 +472,41 @@ mod test {
             &input_stream_m4,
             &input_stream_v4,
         ], &[], num_elements, &expected_output_stream);
+
+        Ok(())
+    }
+
+    #[test]
+    fn m4_uni_v4_muls_id() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let q_shift = 8;
+
+        let uni_m4 = p.alloc_uni_m4();
+        let input_v4 = I0;
+        let output = O0;
+        let m4 = p.uni_m4(uni_m4);
+        let v4 = p.load_v4(input_v4);
+        let res = p.mul_m4_v4(m4, v4, q_shift);
+        p.store_v4(output, res);
+
+        let program = compile(&p)?;
+
+        let num_elements = 8;
+
+        let input_stream_v4 = (0..num_elements * 4).map(|x| x << q_shift).collect::<Vec<_>>();
+        let uniform_m4 = [
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let uniform_data = uniform_m4;
+        let expected_output_stream = input_stream_v4.clone();
+
+        test(&program, &[
+            &input_stream_v4,
+        ], &uniform_data, num_elements as _, &expected_output_stream);
 
         Ok(())
     }

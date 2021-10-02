@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 pub struct Program {
     pub statements: Vec<Statement>,
+    pub num_uniforms: u32,
     pub num_variables: u32,
     pub num_input_stream_loads: HashMap<InputStream, u32>,
     pub num_output_stream_stores: u32,
@@ -13,6 +14,7 @@ impl Program {
     pub fn new() -> Program {
         Program {
             statements: Vec::new(),
+            num_uniforms: 0,
             num_variables: 0,
             num_input_stream_loads: HashMap::new(),
             num_output_stream_stores: 0,
@@ -30,6 +32,33 @@ impl Program {
             x: self.add_s(lhs.x, rhs.x),
             y: self.add_s(lhs.y, rhs.y),
             z: self.add_s(lhs.z, rhs.z),
+        }
+    }
+
+    pub fn alloc_uni_s(&mut self) -> UniformScalar {
+        // TODO: Limit uniforms based on uniform capacity
+        let ret = UniformScalar(self.num_uniforms);
+        self.num_uniforms += 1;
+        ret
+    }
+
+    pub fn alloc_uni_v4(&mut self) -> UniformV4 {
+        UniformV4 {
+            x: self.alloc_uni_s(),
+            y: self.alloc_uni_s(),
+            z: self.alloc_uni_s(),
+            w: self.alloc_uni_s(),
+        }
+    }
+
+    pub fn alloc_uni_m4(&mut self) -> UniformM4 {
+        UniformM4 {
+            columns: [
+                self.alloc_uni_v4(),
+                self.alloc_uni_v4(),
+                self.alloc_uni_v4(),
+                self.alloc_uni_v4(),
+            ],
         }
     }
 
@@ -161,6 +190,32 @@ impl Program {
         self.store_s(dst, src.z);
         self.store_s(dst, src.w);
     }
+
+    pub fn uni_s(&mut self, src: UniformScalar) -> Scalar {
+        let t = self.alloc_var();
+        self.statements.push(Statement::Uniform(t, src.0 as _));
+        Scalar::VariableRef(t)
+    }
+
+    pub fn uni_v4(&mut self, src: UniformV4) -> V4 {
+        V4 {
+            x: self.uni_s(src.x),
+            y: self.uni_s(src.y),
+            z: self.uni_s(src.z),
+            w: self.uni_s(src.w),
+        }
+    }
+
+    pub fn uni_m4(&mut self, src: UniformM4) -> M4 {
+        M4 {
+            columns: [
+                self.uni_v4(src.columns[0]),
+                self.uni_v4(src.columns[1]),
+                self.uni_v4(src.columns[2]),
+                self.uni_v4(src.columns[3]),
+            ],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -174,6 +229,7 @@ pub enum Statement {
     Load(VariableIndex, InputStream, u8),
     Multiply(VariableIndex, Scalar, Scalar, u8),
     Store(OutputStream, Scalar, u8),
+    Uniform(VariableIndex, u8),
 }
 
 #[derive(Clone, Copy)]
@@ -229,6 +285,39 @@ impl M4 {
 
     pub fn transpose(self) -> M4 {
         M4 {
+            columns: self.rows(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UniformScalar(pub u32);
+
+#[derive(Clone, Copy)]
+pub struct UniformV4 {
+    pub x: UniformScalar,
+    pub y: UniformScalar,
+    pub z: UniformScalar,
+    pub w: UniformScalar,
+}
+
+#[derive(Clone, Copy)]
+pub struct UniformM4 {
+    pub columns: [UniformV4; 4],
+}
+
+impl UniformM4 {
+    pub fn rows(self) -> [UniformV4; 4] {
+        [
+            UniformV4 { x: self.columns[0].x, y: self.columns[1].x, z: self.columns[2].x, w: self.columns[3].x },
+            UniformV4 { x: self.columns[0].y, y: self.columns[1].y, z: self.columns[2].y, w: self.columns[3].y },
+            UniformV4 { x: self.columns[0].z, y: self.columns[1].z, z: self.columns[2].z, w: self.columns[3].z },
+            UniformV4 { x: self.columns[0].w, y: self.columns[1].w, z: self.columns[2].w, w: self.columns[3].w },
+        ]
+    }
+
+    pub fn transpose(self) -> UniformM4 {
+        UniformM4 {
             columns: self.rows(),
         }
     }

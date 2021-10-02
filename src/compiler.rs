@@ -74,6 +74,7 @@ enum Statement {
     Load(VariableIndex, InputStream, u8),
     Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
     Store(OutputStream, VariableIndex, u8),
+    Uniform(VariableIndex, u8),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -89,6 +90,7 @@ impl From<program::VariableIndex> for VariableIndex {
 pub struct CompiledProgram {
     pub instructions: Box<[EncodedInstruction]>,
     pub input_stream_thread_strides: Box<[u32]>,
+    pub num_uniforms: u32,
     pub output_stream_thread_stride: u32,
 }
 
@@ -133,6 +135,7 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
     Ok(CompiledProgram {
         instructions: encoded_instructions.into(),
         input_stream_thread_strides,
+        num_uniforms: p.num_uniforms,
         output_stream_thread_stride,
     })
 }
@@ -206,6 +209,15 @@ fn visit_statement(s: &program::Statement, ddg: &mut Ddg) {
             ddg.output_stream_nodes.push(index);
             ret
         }
+        program::Statement::Uniform(dst, offset) => {
+            (
+                Node::new(
+                    Statement::Uniform(dst.into(), offset),
+                    Vec::new(),
+                ),
+                Some(dst),
+            )
+        }
     };
 
     ddg.nodes.push(n);
@@ -263,6 +275,7 @@ fn analyze_liveness(p: &Program) -> (BTreeSet<(VariableIndex, VariableIndex)>, V
             Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
             Statement::Load(dst, _, _) => (Vec::new(), Some(dst)),
             Statement::Store(_, src, _) => (vec![src], None),
+            Statement::Uniform(dst, _) => (Vec::new(), Some(dst)),
         };
         if let Some(d) = def {
             is_live.clear(d.0 as _);
@@ -338,6 +351,10 @@ fn generate_instructions(program: &Program) -> Vec<Instruction> {
         Statement::Store(dst, src, offset) => {
             let src = program.reg(src).unwrap();
             sto(dst, src, offset)
+        }
+        Statement::Uniform(dst, offset) => {
+            let dst = program.reg(dst).unwrap();
+            uni(dst, offset)
         }
     }).collect()
 }
