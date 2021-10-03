@@ -22,7 +22,7 @@ mod test {
         input_stream_bindings: &[&[i32]],
         uniform_data: &[i32],
         num_threads: u32,
-        expected_output_streams: &[&[i32]],
+        expected_output_streams: &[&[i32]; OutputStream::VARIANT_COUNT],
     ) {
         println!("program: {:#?}", program);
         println!("expected output streams: {:?}", expected_output_streams);
@@ -58,13 +58,14 @@ mod test {
 
         test(&CompiledProgram {
             instructions,
-            input_stream_thread_strides: Box::new([1]),
+            input_stream_thread_strides: Box::new([1, 0]),
             num_uniforms: 0,
-            output_stream_thread_strides: Box::new([1]),
+            output_stream_thread_strides: Box::new([1, 0]),
         }, &[
             &input_stream,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
     }
 
@@ -83,13 +84,14 @@ mod test {
 
         test(&CompiledProgram {
             instructions,
-            input_stream_thread_strides: Box::new([1]),
+            input_stream_thread_strides: Box::new([1, 0]),
             num_uniforms: 0,
-            output_stream_thread_strides: Box::new([1]),
+            output_stream_thread_strides: Box::new([1, 0]),
         }, &[
             &input_stream,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
     }
 
@@ -107,11 +109,12 @@ mod test {
 
         test(&CompiledProgram {
             instructions,
-            input_stream_thread_strides: Box::new([]),
+            input_stream_thread_strides: Box::new([0, 0]),
             num_uniforms: 1,
-            output_stream_thread_strides: Box::new([1]),
+            output_stream_thread_strides: Box::new([1, 0]),
         }, &[], &uniform_data, num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
     }
 
@@ -135,6 +138,7 @@ mod test {
             &input_stream,
         ], &[], num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -161,6 +165,7 @@ mod test {
             &input_stream,
         ], &[], num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -184,6 +189,7 @@ mod test {
 
         test(&program, &[], &uniform_data, num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -214,6 +220,7 @@ mod test {
             &input_stream_y,
         ], &[], num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -244,6 +251,7 @@ mod test {
             &input_stream_y,
         ], &[], num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -274,6 +282,7 @@ mod test {
             &input_stream_y,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -308,6 +317,7 @@ mod test {
             &input_stream_y,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -344,6 +354,7 @@ mod test {
             &input_stream_y,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -394,6 +405,7 @@ mod test {
             &input_stream_y,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -424,6 +436,7 @@ mod test {
             &input_stream,
         ],  &[],num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -462,6 +475,7 @@ mod test {
             &input_stream_v3,
         ], &[], num_elements, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -501,6 +515,7 @@ mod test {
             &input_stream_v4,
         ], &[], num_elements, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())
@@ -538,6 +553,7 @@ mod test {
             &input_stream_v4,
         ], &uniform_data, num_elements as _, &[
             &expected_output_stream,
+            &[],
         ]);
 
         Ok(())

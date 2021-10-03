@@ -90,9 +90,9 @@ impl From<program::VariableIndex> for VariableIndex {
 #[derive(Debug)]
 pub struct CompiledProgram {
     pub instructions: Box<[EncodedInstruction]>,
-    pub input_stream_thread_strides: Box<[u32]>,
+    pub input_stream_thread_strides: Box<[u32; InputStream::VARIANT_COUNT]>,
     pub num_uniforms: u32,
-    pub output_stream_thread_strides: Box<[u32]>,
+    pub output_stream_thread_strides: Box<[u32; OutputStream::VARIANT_COUNT]>,
 }
 
 pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
@@ -141,7 +141,7 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
     })
 }
 
-fn determine_thread_strides(p: &program::Program) -> (Box<[u32]>, Box<[u32]>) {
+fn determine_thread_strides(p: &program::Program) -> (Box<[u32; InputStream::VARIANT_COUNT]>, Box<[u32; OutputStream::VARIANT_COUNT]>) {
     let mut input_stream_thread_strides = Box::new([0; InputStream::VARIANT_COUNT]);
     for (&input_stream, &n) in &p.num_input_stream_loads {
         input_stream_thread_strides[input_stream as usize] = n;
