@@ -7,7 +7,7 @@ pub struct Program {
     pub num_uniforms: u32,
     pub num_variables: u32,
     pub num_input_stream_loads: HashMap<InputStream, u32>,
-    pub num_output_stream_stores: u32,
+    pub num_output_stream_stores: HashMap<OutputStream, u32>,
 }
 
 impl Program {
@@ -17,7 +17,7 @@ impl Program {
             num_uniforms: 0,
             num_variables: 0,
             num_input_stream_loads: HashMap::new(),
-            num_output_stream_stores: 0,
+            num_output_stream_stores: HashMap::new(),
         }
     }
 
@@ -42,12 +42,30 @@ impl Program {
         ret
     }
 
+    pub fn alloc_uni_v3(&mut self) -> UniformV3 {
+        UniformV3 {
+            x: self.alloc_uni_s(),
+            y: self.alloc_uni_s(),
+            z: self.alloc_uni_s(),
+        }
+    }
+
     pub fn alloc_uni_v4(&mut self) -> UniformV4 {
         UniformV4 {
             x: self.alloc_uni_s(),
             y: self.alloc_uni_s(),
             z: self.alloc_uni_s(),
             w: self.alloc_uni_s(),
+        }
+    }
+
+    pub fn alloc_uni_m3(&mut self) -> UniformM3 {
+        UniformM3 {
+            columns: [
+                self.alloc_uni_v3(),
+                self.alloc_uni_v3(),
+                self.alloc_uni_v3(),
+            ],
         }
     }
 
@@ -171,10 +189,34 @@ impl Program {
         }
     }
 
+    pub fn pos_s(&mut self, src: Scalar) -> Scalar {
+        let t = self.alloc_var();
+        self.statements.push(Statement::PositivePart(t, src));
+        Scalar::VariableRef(t)
+    }
+
+    pub fn pos_v3(&mut self, src: V3) -> V3 {
+        V3 {
+            x: self.pos_s(src.x),
+            y: self.pos_s(src.y),
+            z: self.pos_s(src.z),
+        }
+    }
+
+    pub fn pos_v4(&mut self, src: V4) -> V4 {
+        V4 {
+            x: self.pos_s(src.x),
+            y: self.pos_s(src.y),
+            z: self.pos_s(src.z),
+            w: self.pos_s(src.w),
+        }
+    }
+
     pub fn store_s(&mut self, dst: OutputStream, src: Scalar) {
         // TODO: Limit stores based on offset field bits
-        let offset = self.num_output_stream_stores;
-        self.num_output_stream_stores += 1;
+        let stores = self.num_output_stream_stores.entry(dst).or_insert(0);
+        let offset = *stores;
+        *stores += 1;
         self.statements.push(Statement::Store(dst, src, offset as _));
     }
 
@@ -197,12 +239,30 @@ impl Program {
         Scalar::VariableRef(t)
     }
 
+    pub fn uni_v3(&mut self, src: UniformV3) -> V3 {
+        V3 {
+            x: self.uni_s(src.x),
+            y: self.uni_s(src.y),
+            z: self.uni_s(src.z),
+        }
+    }
+
     pub fn uni_v4(&mut self, src: UniformV4) -> V4 {
         V4 {
             x: self.uni_s(src.x),
             y: self.uni_s(src.y),
             z: self.uni_s(src.z),
             w: self.uni_s(src.w),
+        }
+    }
+
+    pub fn uni_m3(&mut self, src: UniformM3) -> M3 {
+        M3 {
+            columns: [
+                self.uni_v3(src.columns[0]),
+                self.uni_v3(src.columns[1]),
+                self.uni_v3(src.columns[2]),
+            ],
         }
     }
 
@@ -228,6 +288,7 @@ pub enum Statement {
     Add(VariableIndex, Scalar, Scalar),
     Load(VariableIndex, InputStream, u8),
     Multiply(VariableIndex, Scalar, Scalar, u8),
+    PositivePart(VariableIndex, Scalar),
     Store(OutputStream, Scalar, u8),
     Uniform(VariableIndex, u8),
 }
@@ -268,6 +329,16 @@ pub struct V4 {
     pub w: Scalar,
 }
 
+impl V4 {
+    pub fn truncate_v3(self) -> V3 {
+        V3 {
+            x: self.x,
+            y: self.y,
+            z: self.z,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct M4 {
     pub columns: [V4; 4],
@@ -288,10 +359,27 @@ impl M4 {
             columns: self.rows(),
         }
     }
+
+    pub fn truncate_m3(self) -> M3 {
+        M3 {
+            columns: [
+                self.columns[0].truncate_v3(),
+                self.columns[1].truncate_v3(),
+                self.columns[2].truncate_v3(),
+            ]
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 pub struct UniformScalar(pub u32);
+
+#[derive(Clone, Copy)]
+pub struct UniformV3 {
+    pub x: UniformScalar,
+    pub y: UniformScalar,
+    pub z: UniformScalar,
+}
 
 #[derive(Clone, Copy)]
 pub struct UniformV4 {
@@ -299,6 +387,27 @@ pub struct UniformV4 {
     pub y: UniformScalar,
     pub z: UniformScalar,
     pub w: UniformScalar,
+}
+
+#[derive(Clone, Copy)]
+pub struct UniformM3 {
+    pub columns: [UniformV3; 3],
+}
+
+impl UniformM3 {
+    pub fn rows(self) -> [UniformV3; 3] {
+        [
+            UniformV3 { x: self.columns[0].x, y: self.columns[1].x, z: self.columns[2].x },
+            UniformV3 { x: self.columns[0].y, y: self.columns[1].y, z: self.columns[2].y },
+            UniformV3 { x: self.columns[0].z, y: self.columns[1].z, z: self.columns[2].z },
+        ]
+    }
+
+    pub fn transpose(self) -> UniformM3 {
+        UniformM3 {
+            columns: self.rows(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]

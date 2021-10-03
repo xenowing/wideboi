@@ -26,9 +26,10 @@ impl fmt::Display for InputStream {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, VariantCount)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, VariantCount)]
 pub enum OutputStream {
     O0,
+    O1,
 }
 
 impl OutputStream {
@@ -36,6 +37,7 @@ impl OutputStream {
     pub fn from_u32(x: u32) -> Option<OutputStream> {
         match x {
             0 => Some(OutputStream::O0),
+            1 => Some(OutputStream::O1),
             _ => None
         }
     }
@@ -105,6 +107,7 @@ pub enum Instruction {
     Add(Register, Register, Register),
     Load(Register, InputStream, u8),
     Multiply(Register, Register, Register, u8),
+    PositivePart(Register, Register),
     Store(OutputStream, Register, u8),
     Uniform(Register, u8),
 }
@@ -137,6 +140,12 @@ impl Instruction {
                 .set(&e.lhs_reg, lhs as _)
                 .set(&e.rhs_reg, rhs as _)
                 .set(&e.shift, shift as _)
+            }
+            Instruction::PositivePart(dst, src) => {
+                0
+                .set(&e.opcode, opcode as _)
+                .set(&e.dst_reg, dst as _)
+                .set(&e.src_reg, src as _)
             }
             Instruction::Store(dst, src, offset) => {
                 0
@@ -172,6 +181,7 @@ impl Instruction {
             Opcode::Add => Some(Instruction::Add(dst_reg?, lhs_reg?, rhs_reg?)),
             Opcode::Load => Some(Instruction::Load(dst_reg?, src_input_stream?, stream_offset)),
             Opcode::Multiply => Some(Instruction::Multiply(dst_reg?, lhs_reg?, rhs_reg?, shift)),
+            Opcode::PositivePart => Some(Instruction::PositivePart(dst_reg?, src_reg?)),
             Opcode::Store => Some(Instruction::Store(dst_output_stream?, src_reg?, stream_offset)),
             Opcode::Uniform => Some(Instruction::Uniform(dst_reg?, uniform_offset)),
         }
@@ -183,6 +193,7 @@ impl Instruction {
             Instruction::Add(_, _, _) => "add",
             Instruction::Load(_, _, _) => "lod",
             Instruction::Multiply(_, _, _, _) => "mul",
+            Instruction::PositivePart(_, _) => "pos",
             Instruction::Store(_, _, _) => "sto",
             Instruction::Uniform(_, _) => "uni",
         }
@@ -194,6 +205,7 @@ impl Instruction {
             Instruction::Add(_, _, _) => Opcode::Add,
             Instruction::Load(_, _, _) => Opcode::Load,
             Instruction::Multiply(_, _, _, _) => Opcode::Multiply,
+            Instruction::PositivePart(_, _) => Opcode::PositivePart,
             Instruction::Store(_, _, _) => Opcode::Store,
             Instruction::Uniform(_, _) => Opcode::Uniform,
         }
@@ -207,6 +219,7 @@ impl fmt::Display for Instruction {
             Instruction::Add(dst, lhs, rhs) => write!(f, "{} {}, {}, {}", mnemonic, dst, lhs, rhs),
             Instruction::Load(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
             Instruction::Multiply(dst, lhs, rhs, shift) => write!(f, "{} {}, {}, {}, {}", mnemonic, dst, lhs, rhs, shift),
+            Instruction::PositivePart(dst, src) => write!(f, "{} {}, {}", mnemonic, dst, src),
             Instruction::Store(dst, src, offset) => write!(f, "{} {}, {}, {}", mnemonic, dst, src, offset),
             Instruction::Uniform(dst, offset) => write!(f, "{} {}, {}", mnemonic, dst, offset),
         }
@@ -225,6 +238,10 @@ pub fn mul(dst: Register, lhs: Register, rhs: Register, shift: u8) -> Instructio
     Instruction::Multiply(dst, lhs, rhs, shift & SHIFT_FIELD_MASK)
 }
 
+pub fn pos(dst: Register, src: Register) -> Instruction {
+    Instruction::PositivePart(dst, src)
+}
+
 pub fn sto(dst: OutputStream, src: Register, offset: u8) -> Instruction {
     Instruction::Store(dst, src, offset & STREAM_OFFSET_FIELD_MASK)
 }
@@ -238,6 +255,7 @@ enum Opcode {
     Add,
     Load,
     Multiply,
+    PositivePart,
     Store,
     Uniform,
 }
@@ -249,8 +267,9 @@ impl Opcode {
             0 => Some(Opcode::Add),
             1 => Some(Opcode::Load),
             2 => Some(Opcode::Multiply),
-            3 => Some(Opcode::Store),
-            4 => Some(Opcode::Uniform),
+            3 => Some(Opcode::PositivePart),
+            4 => Some(Opcode::Store),
+            5 => Some(Opcode::Uniform),
             _ => None
         }
     }
@@ -413,6 +432,13 @@ mod test {
     fn assemble_and_roundtrip_mul() {
         let i = mul(R3, R4, R5, 4);
         let e = Multiply(R3, R4, R5, 4);
+        assemble_and_roundtrip(i, e);
+    }
+
+    #[test]
+    fn assemble_and_roundtrip_pos() {
+        let i = pos(R1, R2);
+        let e = PositivePart(R1, R2);
         assemble_and_roundtrip(i, e);
     }
 

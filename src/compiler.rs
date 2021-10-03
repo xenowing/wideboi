@@ -73,6 +73,7 @@ enum Statement {
     Add(VariableIndex, VariableIndex, VariableIndex),
     Load(VariableIndex, InputStream, u8),
     Multiply(VariableIndex, VariableIndex, VariableIndex, u8),
+    PositivePart(VariableIndex, VariableIndex),
     Store(OutputStream, VariableIndex, u8),
     Uniform(VariableIndex, u8),
 }
@@ -91,7 +92,7 @@ pub struct CompiledProgram {
     pub instructions: Box<[EncodedInstruction]>,
     pub input_stream_thread_strides: Box<[u32]>,
     pub num_uniforms: u32,
-    pub output_stream_thread_stride: u32,
+    pub output_stream_thread_strides: Box<[u32]>,
 }
 
 pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
@@ -100,7 +101,7 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
         println!("  {:?}", s);
     }
 
-    let (input_stream_thread_strides, output_stream_thread_stride) = determine_thread_strides(p);
+    let (input_stream_thread_strides, output_stream_thread_strides) = determine_thread_strides(p);
 
     let ddg = construct_ddg(p);
     println!("Directed dependency graph: {:#?}", ddg);
@@ -136,20 +137,22 @@ pub fn compile(p: &program::Program) -> Result<CompiledProgram, CompileError> {
         instructions: encoded_instructions.into(),
         input_stream_thread_strides,
         num_uniforms: p.num_uniforms,
-        output_stream_thread_stride,
+        output_stream_thread_strides,
     })
 }
 
-fn determine_thread_strides(p: &program::Program) -> (Box<[u32]>, u32) {
+fn determine_thread_strides(p: &program::Program) -> (Box<[u32]>, Box<[u32]>) {
     let mut input_stream_thread_strides = Box::new([0; InputStream::VARIANT_COUNT]);
-
     for (&input_stream, &n) in &p.num_input_stream_loads {
         input_stream_thread_strides[input_stream as usize] = n;
     }
 
-    let output_stream_thread_stride = p.num_output_stream_stores;
+    let mut output_stream_thread_strides = Box::new([0; OutputStream::VARIANT_COUNT]);
+    for (&output_stream, &n) in &p.num_output_stream_stores {
+        output_stream_thread_strides[output_stream as usize] = n;
+    }
 
-    (input_stream_thread_strides, output_stream_thread_stride)
+    (input_stream_thread_strides, output_stream_thread_strides)
 }
 
 fn construct_ddg(p: &program::Program) -> Ddg {
@@ -195,6 +198,16 @@ fn visit_statement(s: &program::Statement, ddg: &mut Ddg) {
                     vec![lhs_p, rhs_p],
                 ),
                 Some(dst)
+            )
+        }
+        program::Statement::PositivePart(dst, ref src) => {
+            let (src, src_p) = visit_scalar(src, ddg);
+            (
+                Node::new(
+                    Statement::PositivePart(dst.into(), src),
+                    vec![src_p],
+                ),
+                Some(dst),
             )
         }
         program::Statement::Store(dst, ref src, offset) => {
@@ -274,6 +287,7 @@ fn analyze_liveness(p: &Program) -> (BTreeSet<(VariableIndex, VariableIndex)>, V
             Statement::Add(dst, lhs, rhs) => (vec![lhs, rhs], Some(dst)),
             Statement::Multiply(dst, lhs, rhs, _) => (vec![lhs, rhs], Some(dst)),
             Statement::Load(dst, _, _) => (Vec::new(), Some(dst)),
+            Statement::PositivePart(dst, src) => (vec![src], Some(dst)),
             Statement::Store(_, src, _) => (vec![src], None),
             Statement::Uniform(dst, _) => (Vec::new(), Some(dst)),
         };
@@ -338,15 +352,20 @@ fn generate_instructions(program: &Program) -> Vec<Instruction> {
             let rhs = program.reg(rhs).unwrap();
             add(dst, lhs, rhs)
         }
+        Statement::Load(dst, src, offset) => {
+            let dst = program.reg(dst).unwrap();
+            lod(dst, src, offset)
+        }
         Statement::Multiply(dst, lhs, rhs, shift) => {
             let dst = program.reg(dst).unwrap();
             let lhs = program.reg(lhs).unwrap();
             let rhs = program.reg(rhs).unwrap();
             mul(dst, lhs, rhs, shift)
         }
-        Statement::Load(dst, src, offset) => {
+        Statement::PositivePart(dst, src) => {
             let dst = program.reg(dst).unwrap();
-            lod(dst, src, offset)
+            let src = program.reg(src).unwrap();
+            pos(dst, src)
         }
         Statement::Store(dst, src, offset) => {
             let src = program.reg(src).unwrap();

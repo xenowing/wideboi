@@ -22,10 +22,10 @@ mod test {
         input_stream_bindings: &[&[i32]],
         uniform_data: &[i32],
         num_threads: u32,
-        expected_output_stream: &[i32],
+        expected_output_streams: &[&[i32]],
     ) {
         println!("program: {:#?}", program);
-        println!("expected output stream: {:?}", expected_output_stream);
+        println!("expected output streams: {:?}", expected_output_streams);
 
         for (&binding, &stride) in input_stream_bindings.iter().zip(program.input_stream_thread_strides.iter()) {
             assert_eq!(binding.len() as u32, num_threads * stride);
@@ -35,11 +35,11 @@ mod test {
 
         println!("testing model");
 
-        let (output_stream, num_cycles) = model(program, input_stream_bindings, uniform_data, num_threads);
-        println!(" - output stream: {:?}", output_stream);
+        let (output_streams, num_cycles) = model(program, input_stream_bindings, uniform_data, num_threads);
+        println!(" - output streams: {:?}", output_streams);
         println!(" - num cycles: {}", num_cycles);
 
-        assert_eq!(output_stream, expected_output_stream);
+        assert_eq!(output_streams, expected_output_streams);
 
         println!("success!");
     }
@@ -60,10 +60,12 @@ mod test {
             instructions,
             input_stream_thread_strides: Box::new([1]),
             num_uniforms: 0,
-            output_stream_thread_stride: 1,
+            output_stream_thread_strides: Box::new([1]),
         }, &[
             &input_stream,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
     }
 
     #[test]
@@ -83,10 +85,12 @@ mod test {
             instructions,
             input_stream_thread_strides: Box::new([1]),
             num_uniforms: 0,
-            output_stream_thread_stride: 1,
+            output_stream_thread_strides: Box::new([1]),
         }, &[
             &input_stream,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
     }
 
     #[test]
@@ -105,8 +109,10 @@ mod test {
             instructions,
             input_stream_thread_strides: Box::new([]),
             num_uniforms: 1,
-            output_stream_thread_stride: 1,
-        }, &[], &uniform_data, num_elements as _, &expected_output_stream);
+            output_stream_thread_strides: Box::new([1]),
+        }, &[], &uniform_data, num_elements as _, &[
+            &expected_output_stream,
+        ]);
     }
 
     #[test]
@@ -127,7 +133,9 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ], &[], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -151,7 +159,9 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ], &[], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -172,7 +182,9 @@ mod test {
         let uniform_data = vec![1337];
         let expected_output_stream = vec![1337; num_elements as usize];
 
-        test(&program, &[], &uniform_data, num_elements as _, &expected_output_stream);
+        test(&program, &[], &uniform_data, num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -200,7 +212,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], &[], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -228,7 +242,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ], &[], num_elements as _, &expected_output_stream);
+        ], &[], num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -256,7 +272,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -288,7 +306,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -322,7 +342,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -370,7 +392,9 @@ mod test {
         test(&program, &[
             &input_stream_x,
             &input_stream_y,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -398,7 +422,9 @@ mod test {
 
         test(&program, &[
             &input_stream,
-        ],  &[],num_elements as _, &expected_output_stream);
+        ],  &[],num_elements as _, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -434,7 +460,9 @@ mod test {
         test(&program, &[
             &input_stream_m4,
             &input_stream_v3,
-        ], &[], num_elements, &expected_output_stream);
+        ], &[], num_elements, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -471,7 +499,9 @@ mod test {
         test(&program, &[
             &input_stream_m4,
             &input_stream_v4,
-        ], &[], num_elements, &expected_output_stream);
+        ], &[], num_elements, &[
+            &expected_output_stream,
+        ]);
 
         Ok(())
     }
@@ -506,7 +536,79 @@ mod test {
 
         test(&program, &[
             &input_stream_v4,
-        ], &uniform_data, num_elements as _, &expected_output_stream);
+        ], &uniform_data, num_elements as _, &[
+            &expected_output_stream,
+        ]);
+
+        Ok(())
+    }
+
+    #[test]
+    fn simple_tnl_kernel() -> Result<(), CompileError> {
+        let mut p = Program::new();
+
+        let q_shift = 8;
+
+        let object_vertex_pos_stream = I0;
+        let object_vertex_pos = p.load_v4(object_vertex_pos_stream);
+        let clip_from_object_uniform = p.alloc_uni_m4();
+        let clip_from_object = p.uni_m4(clip_from_object_uniform);
+        let clip_vertex_pos = p.mul_m4_v4(clip_from_object, object_vertex_pos, q_shift);
+        let clip_vertex_pos_stream = O0;
+        p.store_v4(clip_vertex_pos_stream, clip_vertex_pos);
+
+        let object_vertex_normal_stream = I1;
+        let object_vertex_normal = p.load_v3(object_vertex_normal_stream);
+        let view_from_object_uniform = p.alloc_uni_m3();
+        let view_from_object = p.uni_m3(view_from_object_uniform);
+        let view_vertex_normal = p.mul_m3_v3(view_from_object, object_vertex_normal, q_shift);
+        let view_light_dir_uniform = p.alloc_uni_v3();
+        let view_light_dir = p.uni_v3(view_light_dir_uniform);
+        let l = p.dot_v3(view_vertex_normal, view_light_dir, q_shift);
+        let l = p.pos_s(l);
+        let l_stream = O1;
+        p.store_s(l_stream, l);
+
+        let program = compile(&p)?;
+
+        let num_elements = 8;
+
+        let object_vertex_pos_stream = (0..num_elements * 4).map(|x| x << q_shift).collect::<Vec<_>>();
+        let clip_from_object = [
+            2, 0, 0, 0,
+            0, 2, 0, 0,
+            0, 0, 2, 0,
+            0, 0, 0, 1,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let view_from_object = [
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let object_vertex_normal_stream = (0..num_elements * 3).map(|x| x << q_shift).collect::<Vec<_>>();
+        let view_light_dir = [
+            0, 1, 0,
+        ].iter().map(|x| x << q_shift).collect::<Vec<_>>();
+        let uniform_data = vec![
+            clip_from_object,
+            view_from_object,
+            view_light_dir,
+        ].into_iter().flatten().collect::<Vec<_>>();
+        let expected_clip_vertex_pos_stream =
+            object_vertex_pos_stream.iter().enumerate().map(|(i, &x)| if (i % 4) != 3 {
+                x * 2
+            } else {
+                x
+            }).collect::<Vec<_>>();
+        let expected_l_stream = (0..num_elements).map(|x| (x * 3 + 1) << q_shift).collect::<Vec<_>>();
+
+        test(&program, &[
+            &object_vertex_pos_stream,
+            &object_vertex_normal_stream,
+        ], &uniform_data, num_elements as _, &[
+            &expected_clip_vertex_pos_stream,
+            &expected_l_stream,
+        ]);
 
         Ok(())
     }

@@ -6,10 +6,10 @@ pub fn model(
     input_stream_bindings: &[&[i32]],
     uniform_data: &[i32],
     num_threads: u32,
-) -> (Vec<i32>, u32) {
+) -> (Vec<Vec<i32>>, u32) {
     let instructions = program.instructions.iter().map(|&i| Instruction::decode(i).unwrap()).collect::<Vec<_>>();
     let num_instructions = instructions.len() as u32;
-    let mut output_stream = vec![0; (num_threads * program.output_stream_thread_stride) as usize];
+    let mut output_streams = program.output_stream_thread_strides.iter().map(|&stride| vec![0; (num_threads * stride) as usize]).collect::<Vec<_>>();
 
     let num_contexts = 8;
 
@@ -20,29 +20,29 @@ pub fn model(
         pc: u32,
         registers: [i32; Register::VARIANT_COUNT],
         input_stream_offsets: Vec<u32>,
-        output_stream_offset: u32,
+        output_stream_offsets: Vec<u32>,
     }
 
     impl Context {
-        fn new(input_stream_offsets: Vec<u32>) -> Context {
+        fn new(input_stream_offsets: Vec<u32>, output_stream_offsets: Vec<u32>) -> Context {
             Context {
                 current_instruction: None,
 
                 pc: 0,
                 registers: [0; Register::VARIANT_COUNT],
                 input_stream_offsets,
-                output_stream_offset: 0,
+                output_stream_offsets,
             }
         }
     }
 
-    let mut contexts = vec![Context::new(vec![0; program.input_stream_thread_strides.len()]); num_contexts as usize];
+    let mut input_stream_offsets = vec![0; program.input_stream_thread_strides.len()];
+    let mut output_stream_offsets = vec![0; program.output_stream_thread_strides.len()];
+
+    let mut contexts = vec![Context::new(input_stream_offsets.clone(), output_stream_offsets.clone()); num_contexts as usize];
 
     let mut next_context = 0;
     let mut next_thread = 0;
-
-    let mut input_stream_offsets = vec![0; program.input_stream_thread_strides.len()];
-    let mut output_stream_offset = 0;
 
     let mut num_cycles = 0;
 
@@ -56,19 +56,22 @@ pub fn model(
                     context.registers[dst as usize] = lhs.wrapping_add(rhs);
                 }
                 Instruction::Load(dst, src, offset) => {
-                    let input_stream_index = match src {
-                        InputStream::I0 => 0,
-                        InputStream::I1 => 1,
-                    };
-                    context.registers[dst as usize] = input_stream_bindings[input_stream_index][context.input_stream_offsets[input_stream_index] as usize + offset as usize];
+                    let src = src as usize;
+                    context.registers[dst as usize] = input_stream_bindings[src][context.input_stream_offsets[src] as usize + offset as usize];
                 }
                 Instruction::Multiply(dst, lhs, rhs, shift) => {
                     let lhs = context.registers[lhs as usize] as i64;
                     let rhs = context.registers[rhs as usize] as i64;
                     context.registers[dst as usize] = ((lhs * rhs) >> shift) as _;
                 }
-                Instruction::Store(_dst, src, offset) => {
-                    output_stream[context.output_stream_offset as usize + offset as usize] = context.registers[src as usize];
+                Instruction::PositivePart(dst, src) => {
+                    let src = context.registers[src as usize];
+                    context.registers[dst as usize] = if src.is_positive() { src } else { 0 };
+                }
+                Instruction::Store(dst, src, offset) => {
+                    let dst = dst as usize;
+                    let src = context.registers[src as usize];
+                    output_streams[dst][context.output_stream_offsets[dst] as usize + offset as usize] = src;
                 }
                 Instruction::Uniform(dst, offset) => {
                     context.registers[dst as usize] = uniform_data[offset as usize];
@@ -88,12 +91,14 @@ pub fn model(
             context.pc = 0;
             context.current_instruction = Some(instructions[context.pc as usize]);
             context.input_stream_offsets = input_stream_offsets.clone();
-            context.output_stream_offset = output_stream_offset;
+            context.output_stream_offsets = output_stream_offsets.clone();
             next_thread += 1;
             for (offset, stride) in input_stream_offsets.iter_mut().zip(program.input_stream_thread_strides.iter()) {
                 *offset += stride;
             }
-            output_stream_offset += program.output_stream_thread_stride;
+            for (offset, stride) in output_stream_offsets.iter_mut().zip(program.output_stream_thread_strides.iter()) {
+                *offset += stride;
+            }
         }
 
         print!("cycle {:04}", num_cycles);
@@ -115,5 +120,5 @@ pub fn model(
         num_cycles += 1;
     }
 
-    (output_stream, num_cycles)
+    (output_streams, num_cycles)
 }
